@@ -1,0 +1,31 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 150">
+  <g fill="none" stroke="#16865B" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M91 44
+      C73 20 42 23 30 43
+      C17 65 35 84 52 101
+      L91 139
+      C104 151 125 142 125 125
+      C125 116 119 110 111 102" />
+    <path d="M91 44
+      C105 26 128 24 142 41
+      C157 59 143 78 128 92" />
+    <path d="M47 80 L67 80 L75 67 L86 91 L96 75 L106 81 L114 65 L124 80 L137 80" />
+    <circle cx="39" cy="111" r="13" />
+    <path d="M49 121 L61 133" />
+  </g>
+
+  <text x="166" y="82"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="43"
+    font-weight="400"
+    letter-spacing="1.5"
+    fill="#4B4140">CARES</text>
+
+  <text x="168" y="105"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="11"
+    font-weight="500"
+    letter-spacing="0.3"
+    fill="#4B4140">ONE STOP HEALTHCARE</text>
+</svg>
