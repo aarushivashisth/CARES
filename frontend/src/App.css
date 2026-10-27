@@ -781,6 +781,12 @@ button, input, select, textarea {
     overflow-x: auto;
     flex-wrap: nowrap;
     padding: 5px 0;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .nav-links::-webkit-scrollbar {
+    display: none;
   }
 
   .hero {

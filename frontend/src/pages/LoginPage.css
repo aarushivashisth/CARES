@@ -1,0 +1,186 @@
+/* CARES Login Page Styles */
+
+.login-page {
+  padding: 56px 0 80px;
+  display: flex;
+  justify-content: center;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 520px;
+  background: #ffffff;
+  border: 1px solid #dfe5db;
+  border-radius: 14px;
+  padding: 40px;
+  box-shadow: 0 4px 20px rgba(22, 60, 40, 0.04);
+}
+
+.login-header {
+  margin-bottom: 24px;
+}
+
+.login-eyebrow {
+  color: #177b40;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 8px;
+}
+
+.login-header h1 {
+  font-family: Georgia, serif;
+  font-size: 28px;
+  color: #203e37;
+  margin: 0 0 10px;
+  line-height: 1.25;
+}
+
+.login-subtitle {
+  color: #68776e;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.login-alert-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #fdf2f2;
+  border: 1px solid #f9d2d2;
+  border-radius: 8px;
+  color: #c53030;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-field span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2b4941;
+}
+
+.login-field input {
+  padding: 12px 14px;
+  border: 1px solid #d4ded3;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fcfdfc;
+  color: #203e37;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.login-field input:focus {
+  outline: none;
+  border-color: #177b40;
+  box-shadow: 0 0 0 3px rgba(23, 123, 64, 0.12);
+}
+
+.login-submit-button {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+}
+
+.login-footer-links {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #edf1eb;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: #68776e;
+}
+
+.login-footer-links a {
+  color: #177b40;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* Demo Credentials Box */
+.demo-credentials-box {
+  margin-top: 28px;
+  padding: 16px;
+  background: #f5f8f4;
+  border: 1px dashed #b8ceb5;
+  border-radius: 10px;
+}
+
+.demo-credentials-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.demo-credentials-title span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e5235;
+}
+
+.demo-credentials-title small {
+  font-size: 11px;
+  color: #68776e;
+}
+
+.demo-account-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.demo-pill-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid #cbdcd0;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.demo-pill-button:hover {
+  background: #edf5ee;
+  border-color: #177b40;
+}
+
+.demo-pill-button strong {
+  font-size: 12px;
+  color: #147b3d;
+}
+
+.demo-pill-button span {
+  font-size: 10px;
+  color: #68776e;
+}
+
+@media (max-width: 520px) {
+  .login-card {
+    padding: 24px;
+  }
+  .demo-account-buttons {
+    grid-template-columns: 1fr;
+  }
+}

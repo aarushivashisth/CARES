@@ -1,0 +1,22 @@
+{
+  "name": "cares-platform",
+  "version": "1.0.0",
+  "description": "CARES Integrated Full-Stack Healthcare Platform",
+  "private": true,
+  "scripts": {
+    "start:backend": "npm --prefix backend start",
+    "dev:backend": "npm --prefix backend run dev",
+    "start:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "db:init": "npm --prefix backend run db:init",
+    "db:seed": "npm --prefix backend run db:seed",
+    "test:backend": "npm --prefix backend test"
+  },
+  "keywords": [
+    "healthcare",
+    "cares",
+    "capstone"
+  ],
+  "author": "CARES Team",
+  "license": "ISC"
+}

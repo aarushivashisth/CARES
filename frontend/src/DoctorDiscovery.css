@@ -1,8 +1,8 @@
 
 .doctor-page {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 34px 5%;
+  width: min(1280px, 90%);
+  margin-inline: auto;
+  padding: 34px 0;
   color: #203e37;
 }
 
@@ -281,7 +281,8 @@
 }
 
 
-.doctor-profile .doctor-view-profile {
+.doctor-profile .doctor-view-profile,
+.doctor-profile a {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -298,7 +299,164 @@
   cursor: pointer;
 }
 
-.doctor-profile .doctor-view-profile:hover {
+.doctor-profile .doctor-view-profile:hover,
+.doctor-profile a:hover {
   border-color: #147b3d;
   color: #147b3d;
+}
+
+/* Empty Results State */
+.doctor-empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  background: #ffffff;
+  border: 1px dashed #cfd7cb;
+  border-radius: 14px;
+  margin-bottom: 20px;
+}
+
+.doctor-empty-icon {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.doctor-empty-state h3 {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  color: #203e37;
+  margin: 0 0 8px;
+}
+
+.doctor-empty-state p {
+  color: #68776e;
+  font-size: 13px;
+  max-width: 420px;
+  margin: 0 auto 20px;
+  line-height: 1.6;
+}
+
+.doctor-reset-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 20px;
+  border-radius: 7px;
+  background: #147b3d;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.doctor-reset-button:hover {
+  background: #105f32;
+}
+
+/* Loading & Error States */
+.doctor-status-banner {
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dce2da;
+  border-radius: 12px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.doctor-status-banner.error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.doctor-status-banner h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.doctor-status-banner p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: inherit;
+}
+
+.doctor-retry-button {
+  background: #0284c7;
+  color: white;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.doctor-retry-button:hover {
+  background: #0369a1;
+}
+
+/* Provenance Tags */
+.doctor-provenance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  margin-top: 6px;
+}
+
+.doctor-provenance-badge.demo {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.doctor-provenance-badge.verified {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.doctor-provenance-badge.pending {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.doctor-provenance-badge.clarification {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.doctor-provenance-badge.suspended {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.doctor-provenance-badge.rejected {
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #e5e7eb;
+}
+
+.doctor-provenance-badge.unverified {
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.doctor-provenance-badge.sourced {
+  background: #f0fdfa;
+  color: #0f766e;
+  border: 1px solid #99f6e4;
 }

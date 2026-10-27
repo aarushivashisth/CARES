@@ -1,9 +1,22 @@
 
 import { Link, useLocation } from 'react-router-dom'
+import { useAuth } from './context/AuthContext.jsx'
 
 export default function Navbar() {
   const { pathname } = useLocation()
   const isHome = pathname === '/'
+  const { user, isAuthenticated, logout } = useAuth()
+
+  const getDashboardPath = () => {
+    if (!user) return '/login';
+    switch (user.role) {
+      case 'patient': return '/patient/dashboard';
+      case 'doctor': return '/doctor/dashboard';
+      case 'hospital': return '/hospital/dashboard';
+      case 'admin': return '/admin/dashboard';
+      default: return '/login';
+    }
+  };
 
   return (
     <header className="navbar">
@@ -27,19 +40,49 @@ export default function Navbar() {
           Find a doctor
         </Link>
 
-        <Link to="/#hospitals">Hospital insights</Link>
+        <Link
+          className={pathname === '/hospitals' || pathname.startsWith('/hospitals/') ? 'active' : ''}
+          to="/hospitals"
+        >
+          Hospitals
+        </Link>
         <Link to="/#home-care">Care at home</Link>
         <Link to="/#emergency">Emergency</Link>
       </nav>
 
       <div className="nav-actions">
-        <Link to="/#help" className="login-link">
-          Help
-        </Link>
-        <Link to="/#my-care" className="account-button">
-          My care ↗
-        </Link>
+        {isAuthenticated ? (
+          <>
+            <Link to={getDashboardPath()} className="account-button">
+              {user?.role === 'admin' ? 'Admin Portal' : user?.role === 'doctor' ? 'Doctor Portal' : user?.role === 'hospital' ? 'Facility Portal' : 'My Care'} ↗
+            </Link>
+            <button
+              type="button"
+              onClick={logout}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#65756c',
+                fontSize: '11px',
+                cursor: 'pointer',
+                padding: '0 4px'
+              }}
+            >
+              Sign out
+            </button>
+          </>
+        ) : (
+          <>
+            <Link to="/#help" className="login-link">
+              Help
+            </Link>
+            <Link to="/login" className="account-button">
+              Sign in ↗
+            </Link>
+          </>
+        )}
       </div>
     </header>
   )
 }
+

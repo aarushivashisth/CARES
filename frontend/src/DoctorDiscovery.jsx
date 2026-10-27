@@ -1,9 +1,8 @@
 import { Link } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import "./DoctorDiscovery.css";
-import { doctors } from "./doctorData.js";
-
-
+import { api } from "./services/apiClient.js";
+import { doctors as fallbackDoctors } from "./doctorData.js";
 
 const initialFilters = {
   next3Days: true,
@@ -31,6 +30,61 @@ export default function DoctorDiscovery() {
   });
 
   const [filters, setFilters] = useState(initialFilters);
+  const [doctorRecords, setDoctorRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const fetchDoctors = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await api.get("/doctors");
+      if (response && response.success && Array.isArray(response.data)) {
+        setDoctorRecords(response.data);
+      } else {
+        setDoctorRecords([]);
+      }
+    } catch (err) {
+      console.error("Error fetching provider directory:", err);
+      setError(err.message || "Unable to load doctors from database.");
+      // If offline/fallback needed, populate fallbackDoctors so UI remains functional
+      if (fallbackDoctors && fallbackDoctors.length > 0) {
+        setDoctorRecords(fallbackDoctors);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const response = await api.get("/doctors");
+        if (isMounted) {
+          if (response && response.success && Array.isArray(response.data)) {
+            setDoctorRecords(response.data);
+          } else {
+            setDoctorRecords([]);
+          }
+          setLoading(false);
+        }
+      } catch (err) {
+        if (isMounted) {
+          console.error("Error fetching provider directory:", err);
+          setError(err.message || "Unable to load doctors from database.");
+          if (fallbackDoctors && fallbackDoctors.length > 0) {
+            setDoctorRecords(fallbackDoctors);
+          }
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const updateFilter = (name, checked) => {
     setFilters((previous) => ({
@@ -40,66 +94,70 @@ export default function DoctorDiscovery() {
   };
 
   const filteredDoctors = useMemo(() => {
-    return doctors.filter((doctor) => {
+    return (doctorRecords || []).filter((doctor) => {
+      const docName = doctor.name || "";
+      const docSpecialty = doctor.specialty || "";
+      const docHospital = doctor.hospital || "";
+      const docDistance = doctor.distance || "";
+      const docInsurance = Array.isArray(doctor.insurance) ? doctor.insurance : [];
+      const docLanguages = Array.isArray(doctor.languages) ? doctor.languages : [];
+      const docVisitTypes = Array.isArray(doctor.visitTypes) ? doctor.visitTypes : [];
+      const docAvailability = Array.isArray(doctor.availability)
+        ? doctor.availability
+        : ["Next 3 days", "This week"];
+      const docGender = doctor.gender || (docName.includes("Maya") || docName.includes("Sofia") ? "Female" : "Male");
+
       const searchText = search.location.trim().toLowerCase();
 
       const matchesSpecialty =
         search.specialty === "All specialties" ||
-        doctor.specialty
-          .toLowerCase()
-          .includes(search.specialty.toLowerCase()) ||
-        doctor.name.toLowerCase().includes(search.specialty.toLowerCase());
+        docSpecialty.toLowerCase().includes(search.specialty.toLowerCase()) ||
+        docName.toLowerCase().includes(search.specialty.toLowerCase());
 
       const matchesLocation =
         !searchText ||
-        doctor.hospital.toLowerCase().includes(searchText) ||
-        doctor.distance.toLowerCase().includes(searchText);
+        docHospital.toLowerCase().includes(searchText) ||
+        docDistance.toLowerCase().includes(searchText) ||
+        docName.toLowerCase().includes(searchText);
 
       const matchesInsurance =
         search.insurance === "Any insurance" ||
-        doctor.insurance.includes(search.insurance);
+        docInsurance.some((ins) => ins.toLowerCase().includes(search.insurance.toLowerCase()));
 
       const selectedAvailability = [];
-
       if (filters.today) selectedAvailability.push("Today");
       if (filters.next3Days) selectedAvailability.push("Next 3 days");
       if (filters.thisWeek) selectedAvailability.push("This week");
 
       const matchesAvailability =
         selectedAvailability.length === 0 ||
-        selectedAvailability.some((item) =>
-          doctor.availability.includes(item)
-        );
+        selectedAvailability.some((item) => docAvailability.includes(item));
 
       const selectedLanguages = [];
-
       if (filters.english) selectedLanguages.push("English");
       if (filters.spanish) selectedLanguages.push("Spanish");
       if (filters.mandarin) selectedLanguages.push("Mandarin");
 
       const matchesLanguage =
         selectedLanguages.length === 0 ||
-        selectedLanguages.some((language) =>
-          doctor.languages.includes(language)
-        );
+        selectedLanguages.some((language) => docLanguages.includes(language));
 
       const selectedVisitTypes = [];
-
       if (filters.inPerson) selectedVisitTypes.push("In-person");
       if (filters.video) selectedVisitTypes.push("Video consultation");
 
       const matchesVisitType =
         selectedVisitTypes.length === 0 ||
-        selectedVisitTypes.some((type) => doctor.visitTypes.includes(type));
+        selectedVisitTypes.some((type) => docVisitTypes.includes(type));
 
       const matchesAccepting =
-        !filters.accepting || doctor.accepting;
+        !filters.accepting || Boolean(doctor.accepting);
 
       const matchesGender =
-        !filters.female || doctor.gender === "Female";
+        !filters.female || docGender === "Female";
 
       const matchesAccessibility =
-        !filters.accessible || doctor.accessible;
+        !filters.accessible || Boolean(doctor.accessible);
 
       return (
         matchesSpecialty &&
@@ -113,7 +171,7 @@ export default function DoctorDiscovery() {
         matchesAccessibility
       );
     });
-  }, [search, filters]);
+  }, [doctorRecords, search, filters]);
 
   const resetFilters = () => {
     setSpecialty("All specialties");
@@ -126,16 +184,11 @@ export default function DoctorDiscovery() {
       insurance: "Any insurance",
     });
 
-    setFilters({
-      ...initialFilters,
-      next3Days: false,
-      inPerson: false,
-      accepting: false,
-    });
+    setFilters(initialFilters);
   };
 
   return (
-    <main className="doctor-page">
+    <main className="doctor-page page-width">
       <section className="doctor-intro">
         <p className="doctor-eyebrow">FIND YOUR CARE PARTNER</p>
         <h1>Good care starts with the right person.</h1>
@@ -173,7 +226,7 @@ export default function DoctorDiscovery() {
           <input
             value={location}
             onChange={(event) => setLocation(event.target.value)}
-            placeholder="Enter a hospital name"
+            placeholder="Enter a hospital or doctor name"
           />
         </label>
 
@@ -345,86 +398,157 @@ export default function DoctorDiscovery() {
         </aside>
 
         <div className="doctor-list">
+          {loading && (
+            <div className="doctor-status-banner">
+              <h3>Loading healthcare providers...</h3>
+              <p>Connecting to CARES relational database...</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="doctor-status-banner error">
+              <h3>Unable to retrieve doctor directory</h3>
+              <p>{error}</p>
+              <button type="button" className="doctor-retry-button" onClick={fetchDoctors}>
+                Retry Search
+              </button>
+            </div>
+          )}
+
           <h2>
             {filteredDoctors.length}{" "}
             {filteredDoctors.length === 1 ? "doctor" : "doctors"} who fit your
             search
           </h2>
 
-          {filteredDoctors.map((doctor) => (
-            <article className="doctor-card" key={doctor.id}>
-              <div className="doctor-card-main">
-                <div className="doctor-avatar">
-                  {doctor.name.split(" ")[1][0]}
-                </div>
+          {filteredDoctors.map((doctor) => {
+            const nameParts = (doctor.name || "Doctor").split(" ");
+            const avatarInitial = nameParts[1] ? nameParts[1][0] : nameParts[0][0];
 
-                <div className="doctor-info">
-                  <h3>{doctor.name}</h3>
-                  <p className="doctor-specialty">{doctor.specialty}</p>
-                  <p>
-                    ★ {doctor.rating} ({doctor.reviews} reviews) ·{" "}
-                    {doctor.experience} years in practice
-                  </p>
-                  <p>
-                    {doctor.hospital} · {doctor.distance}
-                  </p>
-                  <p>
-                    {doctor.languages.join(", ")} ·{" "}
-                    {doctor.visitTypes.join(" & ")} visits
-                  </p>
-                </div>
+            return (
+              <article className="doctor-card" key={doctor.id}>
+                <div className="doctor-card-main">
+                  <div className="doctor-avatar">
+                    {avatarInitial}
+                  </div>
 
-                <div className="doctor-profile">
-                  <span className="doctor-status">
-                    ●{" "}
-                    {doctor.accepting
-                      ? "Accepting new patients"
-                      : "Not accepting new patients"}
-                  </span>
-
-                  <p>Next available · Sample times</p>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      window.alert(
-                        `Profile for ${doctor.name} — demo only`
-                      )
-                    }
-                  >
-                    View profile ↗
-                  </button>
-                </div>
-              </div>
-
-              <div className="doctor-card-slots">
-                <span>✓ Sample appointment slots</span>
-
-                <div>
-                  {doctor.slots.map((slot) => (
-                    <button
-                      type="button"
-                      key={slot}
-                      onClick={() =>
-                        window.alert(
-                          `${slot} selected for ${doctor.name} — demo only`
+                  <div className="doctor-info">
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <h3 style={{ margin: 0 }}>{doctor.name}</h3>
+                      {doctor.isSynthetic ? (
+                        <span className="doctor-provenance-badge demo" title="Synthetic demonstration record">
+                          Demo Data
+                        </span>
+                      ) : (
+                        doctor.provenanceStatus === 'publicly_sourced' && (
+                          <span className="doctor-provenance-badge sourced" title="Sourced from official hospital public directories">
+                            Official Sourced
+                          </span>
                         )
-                      }
-                    >
-                      {slot}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </article>
-          ))}
+                      )}
+                      {!doctor.isSynthetic && doctor.isVerified && doctor.verificationStatus === 'verified' ? (
+                        <span className="doctor-provenance-badge verified" title="Verified medical license">
+                          ✓ Verified
+                        </span>
+                      ) : doctor.isSynthetic ? null : doctor.verificationStatus === 'pending' ? (
+                        <span className="doctor-provenance-badge pending" title="Verification Under Administrative Review">
+                          ⏳ Pending Review
+                        </span>
+                      ) : doctor.verificationStatus === 'needs_clarification' ? (
+                        <span className="doctor-provenance-badge clarification" title="Administrative Clarification In Progress">
+                          ⚠ Needs Clarification
+                        </span>
+                      ) : doctor.verificationStatus === 'suspended' ? (
+                        <span className="doctor-provenance-badge suspended" title="Verification Suspended">
+                          ⛔ Suspended
+                        </span>
+                      ) : doctor.verificationStatus === 'rejected' ? (
+                        <span className="doctor-provenance-badge rejected" title="Verification Rejected">
+                          ✕ Not Approved
+                        </span>
+                      ) : (
+                        <span className="doctor-provenance-badge unverified" title="Credentials Not Verified">
+                          Not Verified
+                        </span>
+                      )}
+                    </div>
+                    <p className="doctor-specialty">{doctor.specialty}</p>
+                    <p>
+                      ★ {doctor.rating || "5.0"} ({doctor.reviews || 0} reviews) ·{" "}
+                      {doctor.experience || 0} years in practice
+                    </p>
+                    <p>
+                      {doctor.hospital || "Riverside Medical Center"} · {doctor.distance || "Local facility"}
+                    </p>
+                    <p>
+                      {(doctor.languages || []).join(", ") || "English"} ·{" "}
+                      {(doctor.visitTypes || []).join(" & ") || "In-person"} visits
+                    </p>
+                  </div>
 
-          {filteredDoctors.length === 0 && (
-            <p>
-              No doctors match your search. Try changing your specialty or
-              filters.
-            </p>
-          )}
+                  <div className="doctor-profile">
+                    <span className="doctor-status">
+                      ●{" "}
+                      {doctor.accepting
+                        ? "Accepting new patients"
+                        : "Not accepting new patients"}
+                    </span>
+
+                    <p>Next available · Sample times</p>
+
+                    <Link className="doctor-view-profile" to={`/doctors/${doctor.id}`}>
+                      View profile ↗
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="doctor-card-slots">
+                  <span>✓ Sample appointment slots</span>
+
+                  <div>
+                    {(doctor.slots || []).map((slot) => (
+                      <Link
+                        key={slot}
+                        to={`/doctors/${doctor.id}?slot=${encodeURIComponent(slot)}`}
+                        style={{
+                          textDecoration: "none",
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          background: "#ffffff",
+                          border: "1px solid #dce2da",
+                          color: "#168044",
+                          fontWeight: 600,
+                          fontSize: "12px",
+                          display: "inline-block",
+                        }}
+                      >
+                        {slot}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+
+          {filteredDoctors.length === 0 ? (
+            <div className="doctor-empty-state">
+              <span className="doctor-empty-icon" aria-hidden="true">
+                🔍
+              </span>
+              <h3>No doctors match your search</h3>
+              <p>
+                Try adjusting your filters, location, or specialty to see available providers.
+              </p>
+              <button
+                type="button"
+                className="doctor-reset-button"
+                onClick={resetFilters}
+              >
+                Reset all filters
+              </button>
+            </div>
+          ) : null}
 
           <p className="doctor-disclaimer">
             Demonstration directory. Doctors, ratings, insurance information,

@@ -4,6 +4,16 @@ import { Routes, Route, Link } from 'react-router-dom'
 import DoctorDiscovery from './DoctorDiscovery.jsx'
 import SiteLayout from './SiteLayout.jsx'
 import DoctorProfile from "./DoctorProfile.jsx";
+import HospitalDiscovery from './HospitalDiscovery.jsx';
+import HospitalDetail from './HospitalDetail.jsx';
+import { AuthProvider } from './context/AuthContext.jsx';
+import ProtectedRoute from './components/ProtectedRoute.jsx';
+import LoginPage from './pages/LoginPage.jsx';
+import RegisterPage from './pages/RegisterPage.jsx';
+import PatientDashboard from './pages/PatientDashboard.jsx';
+import DoctorDashboard from './pages/DoctorDashboard.jsx';
+import HospitalDashboard from './pages/HospitalDashboard.jsx';
+import AdminDashboard from './pages/AdminDashboard.jsx';
 
 const services = [
   {
@@ -13,7 +23,7 @@ const services = [
     description:
       'Discover doctors by specialty, experience and what matters to you.',
     link: 'Explore doctors',
-    href: '#doctors',
+    href: '/doctors',
   },
   {
     number: '02 / UNDERSTAND',
@@ -22,7 +32,7 @@ const services = [
     description:
       'Explore hospital departments, crowd levels and estimated waits.',
     link: 'View hospital insights',
-    href: '#hospitals',
+    href: '/hospitals',
   },
   {
     number: '03 / GET SUPPORT',
@@ -163,21 +173,37 @@ function HomePage() {
           </div>
 
           <div className="service-grid">
-            {services.map((service) => (
-              <a
-                className="service-card"
-                href={service.href}
-                key={service.number}
-              >
-                <span className="service-icon">{service.icon}</span>
-                <span className="service-number">{service.number}</span>
-                <h3>{service.title}</h3>
-                <p>{service.description}</p>
-                <span className="service-link">
-                  {service.link} <span>↗</span>
-                </span>
-              </a>
-            ))}
+            {services.map((service) =>
+              service.href.startsWith('/') ? (
+                <Link
+                  className="service-card"
+                  to={service.href}
+                  key={service.number}
+                >
+                  <span className="service-icon">{service.icon}</span>
+                  <span className="service-number">{service.number}</span>
+                  <h3>{service.title}</h3>
+                  <p>{service.description}</p>
+                  <span className="service-link">
+                    {service.link} <span>↗</span>
+                  </span>
+                </Link>
+              ) : (
+                <a
+                  className="service-card"
+                  href={service.href}
+                  key={service.number}
+                >
+                  <span className="service-icon">{service.icon}</span>
+                  <span className="service-number">{service.number}</span>
+                  <h3>{service.title}</h3>
+                  <p>{service.description}</p>
+                  <span className="service-link">
+                    {service.link} <span>↗</span>
+                  </span>
+                </a>
+              )
+            )}
           </div>
         </section>
 
@@ -399,9 +425,9 @@ function HomePage() {
             <p>Take one small step toward the support you need.</p>
           </div>
 
-          <a href="#doctors" className="primary-button">
+          <Link to="/doctors" className="primary-button">
             Find your doctor <span>→</span>
-          </a>
+          </Link>
         </section>
 
         <section
@@ -419,38 +445,156 @@ function HomePage() {
   )
 }
 
+function NotFoundPage() {
+  return (
+    <main className="page-width" style={{ padding: '64px 0 80px', textAlign: 'center' }}>
+      <p style={{ color: '#168044', fontSize: '11px', fontWeight: '700', letterSpacing: '0.06em', marginBottom: '8px' }}>
+        CARES DIRECTORY
+      </p>
+      <h1 style={{ fontFamily: 'Georgia, serif', fontSize: '36px', color: '#203e37', margin: '0 0 12px' }}>
+        Page not found
+      </h1>
+      <p style={{ color: '#68776e', fontSize: '14px', maxWidth: '460px', margin: '0 auto 24px', lineHeight: '1.6' }}>
+        The page you are looking for does not exist in our demonstration directory.
+      </p>
+      <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+        <Link to="/doctors" className="primary-button">
+          Find your doctor <span>→</span>
+        </Link>
+        <Link to="/" className="secondary-button">
+          Back to Home
+        </Link>
+      </div>
+    </main>
+  );
+}
+
 function App() {
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={
-          <SiteLayout>
-            <HomePage />
-          </SiteLayout>
-        }
-      />
+    <AuthProvider>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <SiteLayout>
+              <HomePage />
+            </SiteLayout>
+          }
+        />
 
-      <Route
-        path="/doctors"
-        element={
-          <SiteLayout>
-            <DoctorDiscovery />
-          </SiteLayout>
-        }
-      />
+        <Route
+          path="/doctors"
+          element={
+            <SiteLayout>
+              <DoctorDiscovery />
+            </SiteLayout>
+          }
+        />
 
-      {/* ADD THE NEW ROUTE HERE */}
-      <Route
-        path="/doctors/:id"
-        element={
-          <SiteLayout>
-            <DoctorProfile />
-          </SiteLayout>
-        }
-      />
-    </Routes>
+        <Route
+          path="/doctors/:id"
+          element={
+            <SiteLayout>
+              <DoctorProfile />
+            </SiteLayout>
+          }
+        />
+
+        {/* Public Hospital Discovery & Details */}
+        <Route
+          path="/hospitals"
+          element={
+            <SiteLayout>
+              <HospitalDiscovery />
+            </SiteLayout>
+          }
+        />
+
+        <Route
+          path="/hospitals/:id"
+          element={
+            <SiteLayout>
+              <HospitalDetail />
+            </SiteLayout>
+          }
+        />
+
+        {/* Common Authentication & Registration */}
+        <Route
+          path="/login"
+          element={
+            <SiteLayout>
+              <LoginPage />
+            </SiteLayout>
+          }
+        />
+
+        <Route
+          path="/register"
+          element={
+            <SiteLayout>
+              <RegisterPage />
+            </SiteLayout>
+          }
+        />
+
+        {/* Role-Protected Portals */}
+        <Route
+          path="/patient/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={['patient']}>
+              <SiteLayout>
+                <PatientDashboard />
+              </SiteLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/doctor/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={['doctor']}>
+              <SiteLayout>
+                <DoctorDashboard />
+              </SiteLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/hospital/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={['hospital']}>
+              <SiteLayout>
+                <HospitalDashboard />
+              </SiteLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <SiteLayout>
+                <AdminDashboard />
+              </SiteLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="*"
+          element={
+            <SiteLayout>
+              <NotFoundPage />
+            </SiteLayout>
+          }
+        />
+      </Routes>
+    </AuthProvider>
   );
 }
 
 export default App;
+

@@ -1,0 +1,272 @@
+/* CARES Portal Dashboards Shared CSS */
+
+.dashboard-page {
+  padding: 40px 0 80px;
+  color: #203e37;
+}
+
+.dashboard-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: #eef6ee;
+  border: 1px solid #c2dec5;
+  border-radius: 10px;
+  margin-bottom: 28px;
+  font-size: 13px;
+  color: #175432;
+}
+
+.dashboard-banner-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  background: #177b40;
+  color: #ffffff;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.dashboard-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dashboard-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #177b40;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.dashboard-header h1 {
+  font-family: Georgia, serif;
+  font-size: 32px;
+  margin: 0;
+  color: #203e37;
+}
+
+.dashboard-user-meta {
+  color: #68776e;
+  font-size: 14px;
+  margin: 0;
+}
+
+.dashboard-logout-button {
+  padding: 10px 16px;
+  background: #ffffff;
+  border: 1px solid #d4ded3;
+  border-radius: 8px;
+  color: #3b5247;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dashboard-logout-button:hover {
+  background: #f4f6f4;
+  color: #c53030;
+  border-color: #f1c5c5;
+}
+
+/* Metrics Grid */
+.dashboard-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 36px;
+}
+
+.dashboard-metric-card {
+  background: #ffffff;
+  border: 1px solid #dfe5db;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.dashboard-metric-card p {
+  font-size: 12px;
+  color: #68776e;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dashboard-metric-card strong {
+  font-family: Georgia, serif;
+  font-size: 28px;
+  color: #1b4b35;
+}
+
+/* Section Panels */
+.dashboard-panels-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 950px) {
+  .dashboard-panels-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-panel {
+  background: #ffffff;
+  border: 1px solid #dfe5db;
+  border-radius: 14px;
+  padding: 28px;
+  margin-bottom: 24px;
+}
+
+.dashboard-panel h2 {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  color: #203e37;
+  margin: 0 0 16px;
+  border-bottom: 1px solid #edf1eb;
+  padding-bottom: 12px;
+}
+
+/* Appointment Table / Cards */
+.dashboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-list-item {
+  padding: 16px;
+  background: #fbfdfa;
+  border: 1px solid #e2eae1;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dashboard-list-info h3 {
+  font-size: 15px;
+  margin: 0 0 4px;
+  color: #203e37;
+}
+
+.dashboard-list-info p {
+  font-size: 12px;
+  color: #68776e;
+  margin: 0;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.status-badge.requested,
+.status-badge.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.confirmed,
+.status-badge.accepted,
+.status-badge.approved,
+.status-badge.verified,
+.status-badge.active {
+  background: #def7ec;
+  color: #03543f;
+}
+
+.status-badge.cancelled,
+.status-badge.declined,
+.status-badge.rejected {
+  background: #fde8e8;
+  color: #9b1c1c;
+}
+
+.dashboard-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dashboard-accept-btn {
+  padding: 6px 14px;
+  background: #15803d;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dashboard-accept-btn:hover:not(:disabled) {
+  background: #166534;
+}
+
+.dashboard-decline-btn {
+  padding: 6px 14px;
+  background: #ffffff;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dashboard-decline-btn:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.dashboard-accept-btn:disabled,
+.dashboard-decline-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Placeholder Note Box */
+.dashboard-placeholder-card {
+  padding: 16px;
+  background: #f9faf9;
+  border: 1px dashed #cddad0;
+  border-radius: 8px;
+  color: #5c6e64;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dashboard-placeholder-card strong {
+  display: block;
+  color: #177b40;
+  margin-bottom: 4px;
+}
