@@ -255,6 +255,11 @@ export default function DoctorProfile() {
                 <span>Visit options</span>
                 <strong>{(doctor.visitTypes || ["In-person"]).join(", ")}</strong>
               </div>
+
+              <div className="profile-fact">
+                <span>Consultation fee</span>
+                <strong>{doctor.consultationFee !== undefined && doctor.consultationFee !== null ? `₹${doctor.consultationFee}` : "₹500"}</strong>
+              </div>
             </div>
           </article>
 
@@ -377,18 +382,24 @@ export default function DoctorProfile() {
               <div className="profile-form-group">
                 <label>Select Preferred Time Slot</label>
                 <div className="profile-slots">
-                  {(doctor.slots || ["10:00 AM", "2:00 PM", "4:15 PM"]).map((slot) => (
-                    <button
-                      type="button"
-                      className={`profile-slot-button ${selectedSlot === slot ? "is-selected" : ""}`}
-                      key={slot}
-                      onClick={() => setSelectedSlot(slot)}
-                      aria-pressed={selectedSlot === slot}
-                    >
-                      <span>{slot}</span>
-                      <span>{selectedSlot === slot ? "✓ Selected" : "→"}</span>
-                    </button>
-                  ))}
+                  {Array.isArray(doctor.slots) && doctor.slots.length > 0 ? (
+                    doctor.slots.map((slot) => (
+                      <button
+                        type="button"
+                        className={`profile-slot-button ${selectedSlot === slot ? "is-selected" : ""}`}
+                        key={slot}
+                        onClick={() => setSelectedSlot(slot)}
+                        aria-pressed={selectedSlot === slot}
+                      >
+                        <span>{slot}</span>
+                        <span>{selectedSlot === slot ? "✓ Selected" : "→"}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <p style={{ color: "#64748b", fontSize: "13px", margin: "4px 0" }}>
+                      No appointment slots currently available for this provider.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -400,7 +411,10 @@ export default function DoctorProfile() {
                   value={visitType}
                   onChange={(e) => setVisitType(e.target.value)}
                 >
-                  {(doctor.visitTypes || ["In-person", "Video consultation"]).map((type) => (
+                  {(Array.isArray(doctor.visitTypes) && doctor.visitTypes.length > 0
+                    ? doctor.visitTypes
+                    : ["In-person", "Video consultation"]
+                  ).map((type) => (
                     <option key={type} value={type}>
                       {type}
                     </option>
@@ -422,7 +436,7 @@ export default function DoctorProfile() {
               <button
                 type="submit"
                 className="profile-submit-button"
-                disabled={isSubmitting || !selectedSlot}
+                disabled={isSubmitting || !selectedSlot || !Array.isArray(doctor.slots) || doctor.slots.length === 0}
               >
                 {isSubmitting ? "Submitting Request..." : "Submit Appointment Request"}
               </button>

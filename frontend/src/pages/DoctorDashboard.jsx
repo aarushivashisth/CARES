@@ -23,6 +23,20 @@ export default function DoctorDashboard() {
   });
   const [clarificationResponseText, setClarificationResponseText] = useState('');
 
+  // Practice Settings & Availability State
+  const [practiceBio, setPracticeBio] = useState('');
+  const [practiceFee, setPracticeFee] = useState(500);
+  const [practiceLanguages, setPracticeLanguages] = useState(['English', 'Hindi']);
+  const [practiceVisitTypes, setPracticeVisitTypes] = useState(['In-person', 'Video consultation']);
+  const [practiceAccessible, setPracticeAccessible] = useState(true);
+  const [practiceSaving, setPracticeSaving] = useState(false);
+  const [practiceNotice, setPracticeNotice] = useState(null);
+
+  const [intakeSaving, setIntakeSaving] = useState(false);
+  const [scheduleNotice, setScheduleNotice] = useState(null);
+  const [newSlotInput, setNewSlotInput] = useState('');
+  const [customLangInput, setCustomLangInput] = useState('');
+
   const loadDoctorData = useCallback(async () => {
     try {
       setError(null);
@@ -54,6 +68,287 @@ export default function DoctorDashboard() {
   useEffect(() => {
     loadDoctorData();
   }, [loadDoctorData]);
+
+  useEffect(() => {
+    if (data?.profile) {
+      setPracticeBio(data.profile.bio || '');
+      setPracticeFee(
+        data.profile.consultationFee !== undefined && data.profile.consultationFee !== null
+          ? data.profile.consultationFee
+          : 500
+      );
+      setPracticeLanguages(
+        Array.isArray(data.profile.languages) && data.profile.languages.length > 0
+          ? data.profile.languages
+          : ['English', 'Hindi']
+      );
+      setPracticeVisitTypes(
+        Array.isArray(data.profile.visitTypes) && data.profile.visitTypes.length > 0
+          ? data.profile.visitTypes
+          : ['In-person', 'Video consultation']
+      );
+      setPracticeAccessible(Boolean(data.profile.isWheelchairAccessible));
+    }
+  }, [data]);
+
+  // Handle Intake Toggle (Pause/Reopen)
+  const handleToggleIntake = async () => {
+    setIntakeSaving(true);
+    setScheduleNotice(null);
+
+    const currentSlots = Array.isArray(data?.profile?.slots) ? data.profile.slots : [];
+    const currentAccepting = Boolean(data?.profile?.isAcceptingNewPatients);
+    const nextAccepting = !currentAccepting;
+
+    if (nextAccepting && currentSlots.length === 0) {
+      setScheduleNotice({
+        type: 'error',
+        message: 'Cannot enable patient intake without at least one configured appointment slot. Please add an appointment slot below first.',
+      });
+      setIntakeSaving(false);
+      return;
+    }
+
+    try {
+      const res = await api.put('/doctor/portal/availability', {
+        isAcceptingNewPatients: nextAccepting,
+        availableSlots: currentSlots,
+      });
+
+      if (res.success) {
+        setScheduleNotice({
+          type: 'success',
+          message: nextAccepting
+            ? 'Patient intake reopened. New patient appointments are now accepted.'
+            : 'Patient intake paused. New bookings are paused while existing appointments remain intact.',
+        });
+        await loadDoctorData();
+      } else {
+        setScheduleNotice({
+          type: 'error',
+          message: res.error || 'Failed to update intake status.',
+        });
+      }
+    } catch (err) {
+      setScheduleNotice({
+        type: 'error',
+        message: err.message || 'Error updating intake status.',
+      });
+    } finally {
+      setIntakeSaving(false);
+    }
+  };
+
+  // Handle Add Slot
+  const handleAddSlot = async (slotStr) => {
+    const candidate = (slotStr || newSlotInput).trim();
+    if (!candidate) return;
+
+    const slotRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]\s*(AM|PM)$/i;
+    if (!slotRegex.test(candidate)) {
+      setScheduleNotice({
+        type: 'error',
+        message: "Slot format must be 'HH:MM AM' or 'HH:MM PM' (e.g., '09:30 AM', '02:00 PM').",
+      });
+      return;
+    }
+
+    const match = candidate.match(/^(0?[1-9]|1[0-2]):([0-5][0-9])\s*(AM|PM)$/i);
+    const hour = match[1].padStart(2, '0');
+    const minute = match[2];
+    const meridiem = match[3].toUpperCase();
+    const normalizedSlot = `${hour}:${minute} ${meridiem}`;
+
+    const currentSlots = Array.isArray(data?.profile?.slots) ? data.profile.slots : [];
+    if (currentSlots.includes(normalizedSlot)) {
+      setScheduleNotice({
+        type: 'error',
+        message: `Slot '${normalizedSlot}' is already configured in your schedule.`,
+      });
+      return;
+    }
+
+    setIntakeSaving(true);
+    setScheduleNotice(null);
+    const updatedSlots = [...currentSlots, normalizedSlot];
+
+    try {
+      const res = await api.put('/doctor/portal/availability', {
+        isAcceptingNewPatients: Boolean(data?.profile?.isAcceptingNewPatients),
+        availableSlots: updatedSlots,
+      });
+
+      if (res.success) {
+        setScheduleNotice({
+          type: 'success',
+          message: `Slot '${normalizedSlot}' added to your appointment schedule.`,
+        });
+        setNewSlotInput('');
+        await loadDoctorData();
+      } else {
+        setScheduleNotice({
+          type: 'error',
+          message: res.error || 'Failed to add appointment slot.',
+        });
+      }
+    } catch (err) {
+      setScheduleNotice({
+        type: 'error',
+        message: err.message || 'Error adding appointment slot.',
+      });
+    } finally {
+      setIntakeSaving(false);
+    }
+  };
+
+  // Handle Remove Slot with Conflict Protection
+  const handleRemoveSlot = async (slotToRemove) => {
+    setIntakeSaving(true);
+    setScheduleNotice(null);
+
+    const currentSlots = Array.isArray(data?.profile?.slots) ? data.profile.slots : [];
+    const updatedSlots = currentSlots.filter((s) => s !== slotToRemove);
+
+    if (Boolean(data?.profile?.isAcceptingNewPatients) && updatedSlots.length === 0) {
+      setScheduleNotice({
+        type: 'error',
+        message: 'Cannot remove the last slot while intake is active. Either pause intake first or configure another slot.',
+      });
+      setIntakeSaving(false);
+      return;
+    }
+
+    try {
+      const res = await api.put('/doctor/portal/availability', {
+        isAcceptingNewPatients: Boolean(data?.profile?.isAcceptingNewPatients),
+        availableSlots: updatedSlots,
+      });
+
+      if (res.success) {
+        setScheduleNotice({
+          type: 'success',
+          message: `Slot '${slotToRemove}' was removed from your schedule.`,
+        });
+        await loadDoctorData();
+      } else {
+        setScheduleNotice({
+          type: 'error',
+          message: res.error || 'Failed to remove slot.',
+        });
+      }
+    } catch (err) {
+      setScheduleNotice({
+        type: 'error',
+        message: err.message || 'Conflict: Unable to remove slot due to existing patient bookings.',
+      });
+    } finally {
+      setIntakeSaving(false);
+    }
+  };
+
+  // Handle Practice Details Save
+  const handleSavePracticeProfile = async (e) => {
+    e.preventDefault();
+    setPracticeSaving(true);
+    setPracticeNotice(null);
+
+    if (practiceBio.length > 1000) {
+      setPracticeNotice({
+        type: 'error',
+        message: 'Professional biography cannot exceed 1,000 characters.',
+      });
+      setPracticeSaving(false);
+      return;
+    }
+
+    const feeNum = parseFloat(practiceFee);
+    if (isNaN(feeNum) || feeNum < 0) {
+      setPracticeNotice({
+        type: 'error',
+        message: 'Consultation fee must be a non-negative number.',
+      });
+      setPracticeSaving(false);
+      return;
+    }
+
+    if (practiceLanguages.length === 0) {
+      setPracticeNotice({
+        type: 'error',
+        message: 'At least one spoken language must be selected.',
+      });
+      setPracticeSaving(false);
+      return;
+    }
+
+    if (practiceVisitTypes.length === 0) {
+      setPracticeNotice({
+        type: 'error',
+        message: 'At least one visit type must be selected (In-person or Video consultation).',
+      });
+      setPracticeSaving(false);
+      return;
+    }
+
+    try {
+      const res = await api.put('/doctor/portal/profile', {
+        bio: practiceBio.trim(),
+        consultationFee: feeNum,
+        languages: practiceLanguages,
+        visitTypes: practiceVisitTypes,
+        isWheelchairAccessible: Boolean(practiceAccessible),
+      });
+
+      if (res.success) {
+        setPracticeNotice({
+          type: 'success',
+          message: 'Practice profile settings saved successfully.',
+        });
+        await loadDoctorData();
+      } else {
+        setPracticeNotice({
+          type: 'error',
+          message: res.error || 'Failed to update practice profile.',
+        });
+      }
+    } catch (err) {
+      setPracticeNotice({
+        type: 'error',
+        message: err.message || 'Error updating practice profile.',
+      });
+    } finally {
+      setPracticeSaving(false);
+    }
+  };
+
+  const handleToggleLanguage = (lang) => {
+    if (practiceLanguages.includes(lang)) {
+      if (practiceLanguages.length > 1) {
+        setPracticeLanguages(practiceLanguages.filter((l) => l !== lang));
+      }
+    } else {
+      setPracticeLanguages([...practiceLanguages, lang]);
+    }
+  };
+
+  const handleAddCustomLanguage = (e) => {
+    e.preventDefault();
+    const trimmed = customLangInput.trim();
+    if (!trimmed) return;
+    if (!practiceLanguages.includes(trimmed)) {
+      setPracticeLanguages([...practiceLanguages, trimmed]);
+    }
+    setCustomLangInput('');
+  };
+
+  const handleToggleVisitType = (type) => {
+    if (practiceVisitTypes.includes(type)) {
+      if (practiceVisitTypes.length > 1) {
+        setPracticeVisitTypes(practiceVisitTypes.filter((t) => t !== type));
+      }
+    } else {
+      setPracticeVisitTypes([...practiceVisitTypes, type]);
+    }
+  };
 
   const handleVerificationSubmit = async (e) => {
     e.preventDefault();
@@ -382,6 +677,298 @@ export default function DoctorDashboard() {
                   </div>
                 )}
               </article>
+
+              {/* Milestone 6: Practice Settings & Availability Section */}
+              <article className="dashboard-panel" id="practice-settings-section" style={{ marginTop: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h2 style={{ margin: 0, borderBottom: 'none', paddingBottom: 0 }}>Practice Settings & Availability</h2>
+                  <span style={{ fontSize: '11px', color: '#68776e', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Practice Management
+                  </span>
+                </div>
+
+                {/* Sub-section 1: Intake Status */}
+                <div style={{ marginBottom: '24px' }}>
+                  <h3 style={{ fontSize: '15px', color: '#1f2937', margin: '0 0 10px', fontWeight: 600 }}>
+                    1. Patient Intake & Scheduling Status
+                  </h3>
+
+                  {scheduleNotice && (
+                    <div
+                      style={{
+                        padding: '10px 14px',
+                        marginBottom: '12px',
+                        borderRadius: '6px',
+                        background: scheduleNotice.type === 'success' ? '#def7ec' : '#fde8e8',
+                        color: scheduleNotice.type === 'success' ? '#03543f' : '#9b1c1c',
+                        border: `1px solid ${scheduleNotice.type === 'success' ? '#bcf0da' : '#f8b4b4'}`,
+                        fontSize: '13px',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {scheduleNotice.message}
+                    </div>
+                  )}
+
+                  <div className={`settings-intake-card ${data?.profile?.isAcceptingNewPatients ? 'accepting' : 'paused'}`}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                        <span className={`intake-badge ${data?.profile?.isAcceptingNewPatients ? 'accepting' : 'paused'}`}>
+                          {data?.profile?.isAcceptingNewPatients ? '● Accepting New Patients' : '⏸ Intake Paused'}
+                        </span>
+                        <span style={{ fontSize: '12px', color: '#4b5563', fontWeight: 500 }}>
+                          {data?.profile?.isAcceptingNewPatients
+                            ? 'Your profile is bookable in the discovery directory.'
+                            : 'New booking requests are currently disabled.'}
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>
+                        Pausing intake stops new patient appointments while keeping all existing and confirmed appointments completely intact.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={intakeSaving}
+                      onClick={handleToggleIntake}
+                      className={`intake-toggle-btn ${data?.profile?.isAcceptingNewPatients ? 'pause' : 'reopen'}`}
+                    >
+                      {intakeSaving
+                        ? 'Updating Status...'
+                        : data?.profile?.isAcceptingNewPatients
+                        ? 'Pause Patient Intake'
+                        : 'Reopen Patient Intake'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sub-section 2: Schedule Manager */}
+                <div style={{ marginBottom: '28px', borderTop: '1px solid #edf1eb', paddingTop: '20px' }}>
+                  <h3 style={{ fontSize: '15px', color: '#1f2937', margin: '0 0 6px', fontWeight: 600 }}>
+                    2. Appointment Schedule Manager
+                  </h3>
+                  <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#68776e' }}>
+                    Configure recurring available consultation slots. Removing a slot with active upcoming bookings will be blocked to protect patient appointments.
+                  </p>
+
+                  <div className="schedule-slots-wrap">
+                    {data?.profile?.slots && data.profile.slots.length > 0 ? (
+                      data.profile.slots.map((slot) => (
+                        <span key={slot} className="schedule-slot-chip">
+                          <span>{slot}</span>
+                          <button
+                            type="button"
+                            className="schedule-slot-remove"
+                            disabled={intakeSaving}
+                            title={`Remove slot ${slot}`}
+                            aria-label={`Remove slot ${slot}`}
+                            onClick={() => handleRemoveSlot(slot)}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))
+                    ) : (
+                      <p style={{ color: '#b45309', fontSize: '13px', margin: '4px 0' }}>
+                        ⚠️ No slots configured. Add appointment slots below to enable patient bookings.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="slot-add-bar">
+                    <input
+                      type="text"
+                      className="slot-input"
+                      placeholder="e.g. 09:30 AM or 02:00 PM"
+                      value={newSlotInput}
+                      onChange={(e) => setNewSlotInput(e.target.value)}
+                      disabled={intakeSaving}
+                    />
+                    <button
+                      type="button"
+                      className="slot-add-btn"
+                      disabled={intakeSaving || !newSlotInput.trim()}
+                      onClick={() => handleAddSlot()}
+                    >
+                      {intakeSaving ? 'Saving...' : '+ Add Slot'}
+                    </button>
+
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginLeft: '6px' }}>
+                      <span style={{ fontSize: '11px', color: '#68776e' }}>Quick Add:</span>
+                      {['09:00 AM', '10:30 AM', '11:30 AM', '02:00 PM', '03:30 PM', '05:00 PM'].map((qSlot) => (
+                        <button
+                          key={qSlot}
+                          type="button"
+                          disabled={intakeSaving || (data?.profile?.slots || []).includes(qSlot)}
+                          onClick={() => handleAddSlot(qSlot)}
+                          style={{
+                            background: '#f3f4f6',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '12px',
+                            padding: '2px 8px',
+                            fontSize: '11px',
+                            cursor: (data?.profile?.slots || []).includes(qSlot) ? 'default' : 'pointer',
+                            color: (data?.profile?.slots || []).includes(qSlot) ? '#9ca3af' : '#374151',
+                          }}
+                        >
+                          +{qSlot}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-section 3: Practice Details Form */}
+                <div style={{ borderTop: '1px solid #edf1eb', paddingTop: '20px' }}>
+                  <h3 style={{ fontSize: '15px', color: '#1f2937', margin: '0 0 6px', fontWeight: 600 }}>
+                    3. Practice Details & Clinical Consultation
+                  </h3>
+                  <p style={{ margin: '0 0 14px', fontSize: '12px', color: '#68776e' }}>
+                    Update your public practice biography, consultation fees, supported languages, visit modalities, and clinic accessibility.
+                  </p>
+
+                  {practiceNotice && (
+                    <div
+                      style={{
+                        padding: '10px 14px',
+                        marginBottom: '14px',
+                        borderRadius: '6px',
+                        background: practiceNotice.type === 'success' ? '#def7ec' : '#fde8e8',
+                        color: practiceNotice.type === 'success' ? '#03543f' : '#9b1c1c',
+                        border: `1px solid ${practiceNotice.type === 'success' ? '#bcf0da' : '#f8b4b4'}`,
+                        fontSize: '13px',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {practiceNotice.message}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSavePracticeProfile}>
+                    <div className="practice-field" style={{ marginBottom: '14px' }}>
+                      <label htmlFor="practice-bio">
+                        Professional Biography (Max 1,000 characters) *
+                      </label>
+                      <textarea
+                        id="practice-bio"
+                        className="practice-textarea"
+                        value={practiceBio}
+                        maxLength={1000}
+                        onChange={(e) => setPracticeBio(e.target.value)}
+                        placeholder="Describe your clinical background, specialized focus, and patient care philosophy..."
+                        required
+                      />
+                      <div className="char-counter">
+                        {practiceBio.length} / 1,000 characters
+                      </div>
+                    </div>
+
+                    <div className="practice-form-grid" style={{ marginBottom: '14px' }}>
+                      <div className="practice-field">
+                        <label htmlFor="practice-fee">
+                          Consultation Fee (₹ INR) *
+                        </label>
+                        <input
+                          id="practice-fee"
+                          type="number"
+                          min="0"
+                          step="10"
+                          className="practice-input"
+                          value={practiceFee}
+                          onChange={(e) => setPracticeFee(e.target.value)}
+                          required
+                        />
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                          Standard consultation charges per session
+                        </span>
+                      </div>
+
+                      <div className="practice-field">
+                        <label>Clinic Wheelchair Accessibility</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                          <input
+                            type="checkbox"
+                            id="practice-accessible"
+                            checked={practiceAccessible}
+                            onChange={(e) => setPracticeAccessible(e.target.checked)}
+                            style={{ width: '16px', height: '16px', accentColor: '#166534' }}
+                          />
+                          <label htmlFor="practice-accessible" style={{ fontSize: '13px', color: '#374151', cursor: 'pointer' }}>
+                            Wheelchair accessible clinic / step-free ramp access
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="practice-field" style={{ marginBottom: '14px' }}>
+                      <label>Spoken Languages (Select all that apply) *</label>
+                      <div className="tag-pills-wrap">
+                        {['English', 'Hindi', 'Punjabi', 'Urdu', 'Spanish', 'French', 'Bengali'].map((lang) => (
+                          <button
+                            type="button"
+                            key={lang}
+                            className={`tag-pill ${practiceLanguages.includes(lang) ? 'active' : ''}`}
+                            onClick={() => handleToggleLanguage(lang)}
+                          >
+                            {practiceLanguages.includes(lang) ? `✓ ${lang}` : `+ ${lang}`}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                        <input
+                          type="text"
+                          placeholder="Add other language..."
+                          value={customLangInput}
+                          onChange={(e) => setCustomLangInput(e.target.value)}
+                          style={{ padding: '4px 8px', fontSize: '12px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCustomLanguage}
+                          disabled={!customLangInput.trim()}
+                          style={{ padding: '4px 10px', fontSize: '12px', background: '#e5e7eb', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="practice-field" style={{ marginBottom: '20px' }}>
+                      <label>Supported Visit Modalities *</label>
+                      <div style={{ display: 'flex', gap: '20px', marginTop: '6px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={practiceVisitTypes.includes('In-person')}
+                            onChange={() => handleToggleVisitType('In-person')}
+                            style={{ width: '16px', height: '16px', accentColor: '#166534' }}
+                          />
+                          In-person Consultation
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={practiceVisitTypes.includes('Video consultation')}
+                            onChange={() => handleToggleVisitType('Video consultation')}
+                            style={{ width: '16px', height: '16px', accentColor: '#166534' }}
+                          />
+                          Video consultation (Telehealth)
+                        </label>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={practiceSaving}
+                      className="dashboard-accept-btn"
+                      style={{ padding: '10px 24px', fontSize: '14px' }}
+                    >
+                      {practiceSaving ? 'Saving Practice Details...' : 'Save Practice Details'}
+                    </button>
+                  </form>
+                </div>
+              </article>
             </div>
 
             <div>
@@ -567,11 +1154,33 @@ export default function DoctorDashboard() {
               </aside>
 
               <aside className="dashboard-panel">
-                <h2>Clinical Practice Details</h2>
+                <h2>Clinical Practice Summary</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
                   <div>
                     <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>SPECIALTY</span>
                     <strong>{data?.profile?.specialty}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>INTAKE STATUS</span>
+                    <strong style={{ color: data?.profile?.isAcceptingNewPatients ? '#166534' : '#92400e' }}>
+                      {data?.profile?.isAcceptingNewPatients ? '● Accepting Patients' : '⏸ Intake Paused'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>CONSULTATION FEE</span>
+                    <strong>₹{data?.profile?.consultationFee !== undefined && data?.profile?.consultationFee !== null ? data.profile.consultationFee : 500}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>SPOKEN LANGUAGES</span>
+                    <strong>{Array.isArray(data?.profile?.languages) ? data.profile.languages.join(', ') : 'English, Hindi'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>VISIT TYPES</span>
+                    <strong>{Array.isArray(data?.profile?.visitTypes) ? data.profile.visitTypes.join(', ') : 'In-person, Video consultation'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>WHEELCHAIR ACCESS</span>
+                    <strong>{data?.profile?.isWheelchairAccessible ? '✓ Accessible Ramp & Facility' : 'Standard Access'}</strong>
                   </div>
                   <div>
                     <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>LICENSE</span>

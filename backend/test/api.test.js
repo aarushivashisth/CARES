@@ -1794,7 +1794,7 @@ test('Milestone 5: Patient cancellation authorization, same-day rules, and past 
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${pToken}`
+        'Authorization': `Bearer ${pToken}`
       },
       body: JSON.stringify({
         doctor_id: 1,
@@ -1811,6 +1811,396 @@ test('Milestone 5: Patient cancellation authorization, same-day rules, and past 
   }
 });
 
+// ====================================================================
+// MILESTONE 6: PRACTICE SETTINGS, AVAILABILITY & PATIENT PROFILE TESTS
+// ====================================================================
 
+test('Milestone 6: Doctor practice profile update succeeds and audits DOCTOR_PROFILE_UPDATED', async () => {
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.maya@cares.org', password: 'Doctor@12345' }),
+  });
+  const { token: docToken } = await docLogin.json();
 
+  const updateRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`,
+    },
+    body: JSON.stringify({
+      bio: 'Board-certified cardiologist dedicated to evidence-based preventive care and community heart health.',
+      consultationFee: 750,
+      languages: ['English', 'Hindi', 'Punjabi'],
+      visitTypes: ['In-person', 'Video consultation'],
+      isWheelchairAccessible: true,
+    }),
+  });
 
+  const updateData = await updateRes.json();
+  assert.equal(updateRes.status, 200);
+  assert.equal(updateData.success, true);
+  assert.equal(updateData.data.consultationFee, 750);
+  assert.deepEqual(updateData.data.languages, ['English', 'Hindi', 'Punjabi']);
+  assert.deepEqual(updateData.data.visitTypes, ['In-person', 'Video consultation']);
+  assert.equal(updateData.data.isWheelchairAccessible, true);
+  assert.ok(updateData.data.bio.includes('Board-certified cardiologist'));
+
+  // Verify audit event
+  const audit = db.get(
+    `SELECT * FROM audit_events WHERE action = 'DOCTOR_PROFILE_UPDATED' ORDER BY id DESC LIMIT 1`
+  );
+  assert.ok(audit, 'DOCTOR_PROFILE_UPDATED audit record must exist');
+  assert.equal(audit.target_type, 'DOCTOR_PROFILE');
+
+  // Verify public GET /api/doctors reflects updated profile
+  const publicRes = await fetch(`${baseUrl}/api/doctors/1`);
+  const publicData = await publicRes.json();
+  assert.equal(publicRes.status, 200);
+  assert.equal(publicData.data.consultationFee, 750);
+  assert.deepEqual(publicData.data.languages, ['English', 'Hindi', 'Punjabi']);
+});
+
+test('Milestone 6: Doctor practice profile input validation rejects invalid inputs and protected fields', async () => {
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.maya@cares.org', password: 'Doctor@12345' }),
+  });
+  const { token: docToken } = await docLogin.json();
+
+  // 1. Negative fee
+  const negFeeRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({ consultationFee: -100 }),
+  });
+  assert.equal(negFeeRes.status, 400);
+
+  // 2. Malformed languages (not an array)
+  const badLangRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({ languages: 'English, Hindi' }),
+  });
+  assert.equal(badLangRes.status, 400);
+
+  // 3. Unsupported visit type
+  const badVisitRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({ visitTypes: ['Home visit', 'In-person'] }),
+  });
+  assert.equal(badVisitRes.status, 400);
+
+  // 4. Invalid accessibility (string instead of boolean)
+  const badAccessRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({ isWheelchairAccessible: 'yes' }),
+  });
+  assert.equal(badAccessRes.status, 400);
+
+  // 5. Protected field tampering attempt (license_number, is_verified, or arbitrary fields)
+  const tamperRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({ license_number: 'HACK-1234', is_verified: 1 }),
+  });
+  assert.equal(tamperRes.status, 400);
+  const tamperData = await tamperRes.json();
+  assert.ok(
+    tamperData.code === 'DISALLOWED_FIELD' || tamperData.code === 'PROTECTED_FIELD_MUTATION',
+    `Expected DISALLOWED_FIELD or PROTECTED_FIELD_MUTATION but got ${tamperData.code}`
+  );
+
+  // 6. Bio exceeding 1000 characters
+  const longBio = 'A'.repeat(1005);
+  const longBioRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({ bio: longBio }),
+  });
+  assert.equal(longBioRes.status, 400);
+
+  // 7. Non-doctor access denied (patient token)
+  const pLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' }),
+  });
+  const { token: pToken } = await pLogin.json();
+
+  const patientForbiddenRes = await fetch(`${baseUrl}/api/doctor/portal/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pToken}` },
+    body: JSON.stringify({ consultationFee: 500 }),
+  });
+  assert.equal(patientForbiddenRes.status, 403);
+});
+
+test('Milestone 6: Doctor availability scheduling controls intake, slots, and enforces conflict protections', async () => {
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.maya@cares.org', password: 'Doctor@12345' }),
+  });
+  const { token: docToken } = await docLogin.json();
+
+  const pLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' }),
+  });
+  const { token: pToken } = await pLogin.json();
+
+  const docProfile = db.get(`SELECT available_slots_json FROM doctor_profiles WHERE id = 1`);
+  const initialSlots = JSON.parse(docProfile.available_slots_json);
+
+  // 1. Pause intake
+  const pauseRes = await fetch(`${baseUrl}/api/doctor/portal/availability`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      isAcceptingNewPatients: false,
+      availableSlots: initialSlots,
+    }),
+  });
+  assert.equal(pauseRes.status, 200);
+
+  // Verify booking is rejected while intake paused
+  const futureDate = '2026-12-01';
+  const bookWhilePausedRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pToken}` },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: initialSlots[0],
+      requested_date: futureDate,
+    }),
+  });
+  assert.equal(bookWhilePausedRes.status, 400);
+  const bookPausedData = await bookWhilePausedRes.json();
+  assert.equal(bookPausedData.code, 'DOCTOR_NOT_ACCEPTING_REQUESTS');
+
+  // 2. Reopening intake requires non-empty schedule
+  const emptyScheduleRes = await fetch(`${baseUrl}/api/doctor/portal/availability`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      isAcceptingNewPatients: true,
+      availableSlots: [],
+    }),
+  });
+  assert.equal(emptyScheduleRes.status, 400);
+  const emptyData = await emptyScheduleRes.json();
+  assert.equal(emptyData.code, 'SCHEDULE_REQUIRED_FOR_INTAKE');
+
+  // 3. Reopen intake with slots including new slots '07:30 AM' and '05:45 PM'
+  const expandedSlots = [...initialSlots, '07:30 AM', '05:45 PM'];
+  const reopenRes = await fetch(`${baseUrl}/api/doctor/portal/availability`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      isAcceptingNewPatients: true,
+      availableSlots: expandedSlots,
+    }),
+  });
+  assert.equal(reopenRes.status, 200);
+  const reopenData = await reopenRes.json();
+  assert.ok(reopenData.data.availableSlots.includes('07:30 AM'));
+
+  // Verify DOCTOR_AVAILABILITY_UPDATED audit
+  const audit = db.get(
+    `SELECT * FROM audit_events WHERE action = 'DOCTOR_AVAILABILITY_UPDATED' ORDER BY id DESC LIMIT 1`
+  );
+  assert.ok(audit, 'DOCTOR_AVAILABILITY_UPDATED audit record must exist');
+
+  // 4. Booking newly added slot now succeeds
+  const bookNewSlotRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pToken}` },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '07:30 AM',
+      requested_date: futureDate,
+    }),
+  });
+  assert.equal(bookNewSlotRes.status, 201);
+  const bookNewSlotData = await bookNewSlotRes.json();
+  assert.ok(bookNewSlotData.data.id);
+
+  // 5. Attempting to remove '07:30 AM' is blocked with 409 because active booking exists
+  const removeConflictRes = await fetch(`${baseUrl}/api/doctor/portal/availability`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      isAcceptingNewPatients: true,
+      availableSlots: initialSlots, // Excludes '07:30 AM'
+    }),
+  });
+  assert.equal(removeConflictRes.status, 409);
+  const removeConflictData = await removeConflictRes.json();
+  assert.equal(removeConflictData.code, 'SLOT_REMOVAL_CONFLICT');
+  assert.ok(removeConflictData.error.includes('07:30 AM'));
+
+  // 6. Removing an unbooked slot ('05:45 PM') succeeds
+  const slotsWithout545 = [...initialSlots, '07:30 AM'];
+  const removeUnbookedRes = await fetch(`${baseUrl}/api/doctor/portal/availability`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      isAcceptingNewPatients: true,
+      availableSlots: slotsWithout545,
+    }),
+  });
+  assert.equal(removeUnbookedRes.status, 200);
+
+  // 7. Duplicate and malformed slots rejected
+  const dupRes = await fetch(`${baseUrl}/api/doctor/portal/availability`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      isAcceptingNewPatients: true,
+      availableSlots: ['09:00 AM', '09:00 AM'],
+    }),
+  });
+  assert.equal(dupRes.status, 400);
+
+  const malformedRes = await fetch(`${baseUrl}/api/doctor/portal/availability`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      isAcceptingNewPatients: true,
+      availableSlots: ['25:99 XX'],
+    }),
+  });
+  assert.equal(malformedRes.status, 400);
+});
+
+test('Milestone 6: Patient profile update succeeds, enforces strict isolation, and validates fields', async () => {
+  const pLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' }),
+  });
+  const { token: pToken } = await pLogin.json();
+
+  // 1. Successful update of patient profile
+  const updateRes = await fetch(`${baseUrl}/api/patient/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${pToken}`,
+    },
+    body: JSON.stringify({
+      full_name: 'Ananya Sharma Updated',
+      phone: '+91-9876543210',
+      gender: 'Female',
+      date_of_birth: '1995-08-20',
+      emergency_contact: 'Vikram Sharma (+91-9876543211)',
+      city: 'Mohali',
+    }),
+  });
+
+  assert.equal(updateRes.status, 200);
+  const updateData = await updateRes.json();
+  assert.equal(updateData.success, true);
+  assert.equal(updateData.data.full_name, 'Ananya Sharma Updated');
+  assert.equal(updateData.data.phone, '+91-9876543210');
+  assert.equal(updateData.data.gender, 'Female');
+  assert.equal(updateData.data.date_of_birth, '1995-08-20');
+  assert.equal(updateData.data.emergency_contact, 'Vikram Sharma (+91-9876543211)');
+  assert.equal(updateData.data.city, 'Mohali');
+
+  // Verify PATIENT_PROFILE_UPDATED audit
+  const audit = db.get(
+    `SELECT * FROM audit_events WHERE action = 'PATIENT_PROFILE_UPDATED' ORDER BY id DESC LIMIT 1`
+  );
+  assert.ok(audit, 'PATIENT_PROFILE_UPDATED audit record must exist');
+
+  // Verify GET /api/patient/dashboard returns the updated profile
+  const dashRes = await fetch(`${baseUrl}/api/patient/dashboard`, {
+    headers: { Authorization: `Bearer ${pToken}` },
+  });
+  const dashData = await dashRes.json();
+  assert.equal(dashData.data.profile.full_name, 'Ananya Sharma Updated');
+  assert.equal(dashData.data.profile.city, 'Mohali');
+
+  // 2. Reject future date of birth
+  const futureDobRes = await fetch(`${baseUrl}/api/patient/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pToken}` },
+    body: JSON.stringify({ date_of_birth: '2099-01-01' }),
+  });
+  assert.equal(futureDobRes.status, 400);
+  const futureDobData = await futureDobRes.json();
+  assert.equal(futureDobData.code, 'FUTURE_DOB_NOT_ALLOWED');
+
+  // 3. Reject invalid phone number
+  const badPhoneRes = await fetch(`${baseUrl}/api/patient/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pToken}` },
+    body: JSON.stringify({ phone: '123' }),
+  });
+  assert.equal(badPhoneRes.status, 400);
+
+  // 4. Reject mass assignment / protected fields (e.g. role, status, user_id, password_hash)
+  const massAssignRes = await fetch(`${baseUrl}/api/patient/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pToken}` },
+    body: JSON.stringify({ role: 'admin', status: 'active', user_id: 99 }),
+  });
+  assert.equal(massAssignRes.status, 400);
+  const massAssignData = await massAssignRes.json();
+  assert.equal(massAssignData.code, 'DISALLOWED_FIELD');
+
+  // 5. Non-patient access denied
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.maya@cares.org', password: 'Doctor@12345' }),
+  });
+  const { token: docToken } = await docLogin.json();
+
+  const docForbiddenRes = await fetch(`${baseUrl}/api/patient/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({ full_name: 'Attempted Doctor Overwrite' }),
+  });
+  assert.equal(docForbiddenRes.status, 403);
+
+  // 6. Patient-to-patient isolation: another patient cannot modify target patient's profile
+  const p2Reg = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: `isolated_patient_${Date.now()}@example.com`,
+      password: 'Patient@12345',
+      full_name: 'Second Patient',
+      phone: '555-9988',
+      gender: 'Male',
+    }),
+  });
+  const { token: p2Token } = await p2Reg.json();
+
+  // Patient 2 updates their own profile
+  const p2Update = await fetch(`${baseUrl}/api/patient/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p2Token}` },
+    body: JSON.stringify({ full_name: 'Second Patient Modified', city: 'Panchkula' }),
+  });
+  assert.equal(p2Update.status, 200);
+
+  // Patient 1's profile remains untouched
+  const p1Check = await fetch(`${baseUrl}/api/patient/dashboard`, {
+    headers: { Authorization: `Bearer ${pToken}` },
+  });
+  const p1CheckData = await p1Check.json();
+  assert.equal(p1CheckData.data.profile.full_name, 'Ananya Sharma Updated');
+  assert.equal(p1CheckData.data.profile.city, 'Mohali');
+
+  // Verify patient appointments remain intact
+  assert.ok(Array.isArray(p1CheckData.data.appointments));
+});

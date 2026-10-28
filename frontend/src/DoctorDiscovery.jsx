@@ -483,6 +483,10 @@ export default function DoctorDiscovery() {
                     <p>
                       {(doctor.languages || []).join(", ") || "English"} ·{" "}
                       {(doctor.visitTypes || []).join(" & ") || "In-person"} visits
+                      {doctor.consultationFee !== undefined && doctor.consultationFee !== null && (
+                        <span> · ₹{doctor.consultationFee}</span>
+                      )}
+                      {doctor.accessible && <span> · ♿ Accessible</span>}
                     </p>
                   </div>
 

@@ -614,7 +614,13 @@ router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, 
         isVerified: Boolean(doctor.is_verified === 1 && doctor.verification_status === 'verified'),
         registrationCheckStatus: doctor.registration_check_status || 'unchecked',
         verifiedAt: doctor.verified_at,
+        bio: doctor.bio || '',
+        consultationFee: doctor.consultation_fee || 0,
+        languages: JSON.parse(doctor.languages_json || '["English"]'),
+        visitTypes: JSON.parse(doctor.visit_types_json || '["In-person"]'),
         slots: JSON.parse(doctor.available_slots_json || '[]'),
+        isAcceptingNewPatients: Boolean(doctor.is_accepting_new_patients),
+        isWheelchairAccessible: Boolean(doctor.is_wheelchair_accessible),
       },
       latestApplication: latestApp ? {
         id: latestApp.id,
@@ -932,5 +938,484 @@ router.post(
     });
   }
 );
+
+/**
+ * PUT /api/doctor/portal/profile
+ * Doctor updates practice settings (bio, consultation fee, languages, visit types, accessibility)
+ */
+router.put('/portal/profile', authenticateToken, requireRole('doctor'), (req, res) => {
+  const doctor = db.get(
+    `SELECT * FROM doctor_profiles WHERE user_id = ?`,
+    [req.user.id]
+  );
+
+  if (!doctor) {
+    return res.status(404).json({
+      success: false,
+      error: 'Doctor profile not found for authenticated user.',
+      code: 'PROFILE_NOT_FOUND',
+    });
+  }
+
+  // 1. Mass Assignment Guard: Explicitly reject administrative and identity fields
+  const protectedFields = [
+    'id', 'user_id', 'userId', 'role', 'status', 'license_number', 'licenseNumber',
+    'issuing_council', 'issuingCouncil', 'qualifications', 'is_verified', 'isVerified',
+    'verification_status', 'verificationStatus', 'verified_at', 'verifiedAt',
+    'verified_by_user_id', 'registration_check_status', 'registrationCheckStatus',
+    'is_synthetic', 'isSynthetic', 'rating', 'reviews_count', 'reviewsCount',
+    'full_name', 'fullName', 'specialty', 'provenance_status', 'affiliation_source'
+  ];
+
+  for (const field of protectedFields) {
+    if (req.body[field] !== undefined) {
+      return res.status(400).json({
+        success: false,
+        error: `Field '${field}' is protected and cannot be modified via doctor practice settings.`,
+        code: 'PROTECTED_FIELD_MUTATION',
+      });
+    }
+  }
+
+  // Allowed editable fields
+  const allowedFields = [
+    'bio', 'consultation_fee', 'consultationFee',
+    'languages', 'languages_json',
+    'visit_types', 'visitTypes', 'visit_types_json',
+    'is_wheelchair_accessible', 'isWheelchairAccessible'
+  ];
+
+  const payloadKeys = Object.keys(req.body);
+  const unknownKeys = payloadKeys.filter((k) => !allowedFields.includes(k));
+  if (unknownKeys.length > 0) {
+    return res.status(400).json({
+      success: false,
+      error: `Unknown or disallowed field(s): ${unknownKeys.join(', ')}.`,
+      code: 'INVALID_EXTRA_FIELDS',
+    });
+  }
+
+  // 2. Validate Bio (optional, max 1000 characters)
+  let validatedBio = doctor.bio;
+  if (req.body.bio !== undefined) {
+    if (req.body.bio === null) {
+      validatedBio = '';
+    } else if (typeof req.body.bio !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Biography must be a string.',
+        code: 'INVALID_BIO',
+      });
+    } else if (req.body.bio.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Biography cannot exceed 1,000 characters.',
+        code: 'BIO_TOO_LONG',
+      });
+    } else {
+      validatedBio = req.body.bio.trim();
+    }
+  }
+
+  // 3. Validate Consultation Fee (numeric, non-negative)
+  let validatedFee = doctor.consultation_fee;
+  const rawFee = req.body.consultation_fee !== undefined ? req.body.consultation_fee : req.body.consultationFee;
+  if (rawFee !== undefined) {
+    const feeNum = Number(rawFee);
+    if (typeof rawFee === 'boolean' || isNaN(feeNum) || !isFinite(feeNum) || feeNum < 0 || feeNum > 100000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Consultation fee must be a valid non-negative number.',
+        code: 'INVALID_CONSULTATION_FEE',
+      });
+    }
+    validatedFee = Math.round(feeNum * 100) / 100;
+  }
+
+  // 4. Validate Spoken Languages (array of non-empty strings)
+  let validatedLanguagesJson = doctor.languages_json;
+  const rawLanguages = req.body.languages !== undefined ? req.body.languages : (req.body.languages_json !== undefined ? req.body.languages_json : undefined);
+  if (rawLanguages !== undefined) {
+    let languagesArray = rawLanguages;
+    if (typeof rawLanguages === 'string') {
+      try {
+        languagesArray = JSON.parse(rawLanguages);
+      } catch {
+        return res.status(400).json({
+          success: false,
+          error: 'Languages must be a valid JSON array of non-empty strings.',
+          code: 'INVALID_LANGUAGES_FORMAT',
+        });
+      }
+    }
+    if (!Array.isArray(languagesArray) || languagesArray.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one spoken language must be specified.',
+        code: 'EMPTY_LANGUAGES',
+      });
+    }
+    const cleanLangs = [];
+    for (const lang of languagesArray) {
+      if (typeof lang !== 'string' || !lang.trim() || lang.trim().length > 50) {
+        return res.status(400).json({
+          success: false,
+          error: 'Each spoken language must be a non-empty string under 50 characters.',
+          code: 'INVALID_LANGUAGE_ITEM',
+        });
+      }
+      const trimmed = lang.trim();
+      if (!cleanLangs.includes(trimmed)) cleanLangs.push(trimmed);
+    }
+    validatedLanguagesJson = JSON.stringify(cleanLangs);
+  }
+
+  // 5. Validate Visit Types (subset of ['In-person', 'Video consultation'])
+  let validatedVisitTypesJson = doctor.visit_types_json;
+  const rawVisitTypes = req.body.visit_types !== undefined ? req.body.visit_types : (req.body.visit_types_json !== undefined ? req.body.visit_types_json : (req.body.visitTypes !== undefined ? req.body.visitTypes : undefined));
+  if (rawVisitTypes !== undefined) {
+    let visitTypesArray = rawVisitTypes;
+    if (typeof rawVisitTypes === 'string') {
+      try {
+        visitTypesArray = JSON.parse(rawVisitTypes);
+      } catch {
+        return res.status(400).json({
+          success: false,
+          error: 'Visit types must be a valid array.',
+          code: 'INVALID_VISIT_TYPES_FORMAT',
+        });
+      }
+    }
+    const allowedVisitTypes = ['In-person', 'Video consultation'];
+    if (!Array.isArray(visitTypesArray) || visitTypesArray.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one visit type must be supported.',
+        code: 'EMPTY_VISIT_TYPES',
+      });
+    }
+    for (const vt of visitTypesArray) {
+      if (!allowedVisitTypes.includes(vt)) {
+        return res.status(400).json({
+          success: false,
+          error: `Unsupported visit type '${vt}'. Allowed visit types: ${allowedVisitTypes.join(', ')}.`,
+          code: 'UNSUPPORTED_VISIT_TYPE',
+        });
+      }
+    }
+    const uniqueVisitTypes = [...new Set(visitTypesArray)];
+    validatedVisitTypesJson = JSON.stringify(uniqueVisitTypes);
+  }
+
+  // 6. Validate Wheelchair Accessibility (boolean)
+  let validatedAccessibility = doctor.is_wheelchair_accessible;
+  const rawAccessibility = req.body.is_wheelchair_accessible !== undefined ? req.body.is_wheelchair_accessible : req.body.isWheelchairAccessible;
+  if (rawAccessibility !== undefined) {
+    if (typeof rawAccessibility !== 'boolean' && rawAccessibility !== 0 && rawAccessibility !== 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Wheelchair accessibility must be a boolean.',
+        code: 'INVALID_ACCESSIBILITY_VALUE',
+      });
+    }
+    validatedAccessibility = rawAccessibility ? 1 : 0;
+  }
+
+  // 7. Atomic Transaction & Audit Log
+  db.transaction((tx) => {
+    tx.run(
+      `UPDATE doctor_profiles
+       SET bio = ?,
+           consultation_fee = ?,
+           languages_json = ?,
+           visit_types_json = ?,
+           is_wheelchair_accessible = ?,
+           updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`,
+      [
+        validatedBio,
+        validatedFee,
+        validatedLanguagesJson,
+        validatedVisitTypesJson,
+        validatedAccessibility,
+        doctor.id,
+        req.user.id
+      ]
+    );
+
+    tx.run(
+      `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
+       VALUES (?, 'DOCTOR_PROFILE_UPDATED', 'DOCTOR_PROFILE', ?, ?, ?)`,
+      [
+        req.user.id,
+        doctor.id,
+        JSON.stringify({
+          consultationFee: validatedFee,
+          languages: JSON.parse(validatedLanguagesJson),
+          visitTypes: JSON.parse(validatedVisitTypesJson),
+          isWheelchairAccessible: Boolean(validatedAccessibility)
+        }),
+        req.ip || '127.0.0.1'
+      ]
+    );
+  });
+
+  const updated = db.get(`SELECT * FROM doctor_profiles WHERE id = ?`, [doctor.id]);
+
+  const formattedProfile = {
+    id: updated.id,
+    name: updated.full_name,
+    specialty: updated.specialty,
+    bio: updated.bio,
+    consultationFee: updated.consultation_fee,
+    consultation_fee: updated.consultation_fee,
+    languages: JSON.parse(updated.languages_json || '[]'),
+    visitTypes: JSON.parse(updated.visit_types_json || '[]'),
+    slots: JSON.parse(updated.available_slots_json || '[]'),
+    isAcceptingNewPatients: Boolean(updated.is_accepting_new_patients),
+    isWheelchairAccessible: Boolean(updated.is_wheelchair_accessible),
+    isVerified: Boolean(updated.is_verified === 1 && updated.verification_status === 'verified'),
+    verificationStatus: updated.verification_status,
+  };
+
+  res.status(200).json({
+    success: true,
+    message: 'Doctor practice settings updated successfully.',
+    data: {
+      ...formattedProfile,
+      profile: formattedProfile,
+    },
+  });
+});
+
+/**
+ * PUT /api/doctor/portal/availability
+ * Manage doctor intake status (is_accepting_new_patients) and weekly schedule slots (available_slots_json)
+ */
+router.put('/portal/availability', authenticateToken, requireRole('doctor'), (req, res) => {
+  const doctor = db.get(
+    `SELECT * FROM doctor_profiles WHERE user_id = ?`,
+    [req.user.id]
+  );
+
+  if (!doctor) {
+    return res.status(404).json({
+      success: false,
+      error: 'Doctor profile not found for authenticated user.',
+      code: 'PROFILE_NOT_FOUND',
+    });
+  }
+
+  // 1. Mass Assignment Guard
+  const protectedFields = [
+    'id', 'user_id', 'userId', 'role', 'status', 'is_verified', 'isVerified',
+    'verification_status', 'verificationStatus', 'license_number', 'bio', 'consultation_fee', 'full_name'
+  ];
+  for (const f of protectedFields) {
+    if (req.body[f] !== undefined) {
+      return res.status(400).json({
+        success: false,
+        error: `Field '${f}' cannot be modified via availability endpoint.`,
+        code: 'PROTECTED_FIELD_MUTATION',
+      });
+    }
+  }
+
+  const allowedFields = [
+    'is_accepting_new_patients', 'isAcceptingNewPatients',
+    'available_slots', 'available_slots_json', 'availableSlots'
+  ];
+  const payloadKeys = Object.keys(req.body);
+  const unknownKeys = payloadKeys.filter((k) => !allowedFields.includes(k));
+  if (unknownKeys.length > 0) {
+    return res.status(400).json({
+      success: false,
+      error: `Unknown field(s): ${unknownKeys.join(', ')}.`,
+      code: 'INVALID_EXTRA_FIELDS',
+    });
+  }
+
+  // 2. Validate is_accepting_new_patients
+  const rawAccepting = req.body.is_accepting_new_patients !== undefined ? req.body.is_accepting_new_patients : req.body.isAcceptingNewPatients;
+  let validatedAccepting = Boolean(doctor.is_accepting_new_patients);
+  if (rawAccepting !== undefined) {
+    if (typeof rawAccepting !== 'boolean' && rawAccepting !== 0 && rawAccepting !== 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'is_accepting_new_patients must be a boolean.',
+        code: 'INVALID_INTAKE_VALUE',
+      });
+    }
+    validatedAccepting = Boolean(rawAccepting);
+  }
+
+  // 3. Validate available_slots
+  const rawSlots = req.body.available_slots !== undefined ? req.body.available_slots : (req.body.available_slots_json !== undefined ? req.body.available_slots_json : req.body.availableSlots);
+  let validatedSlots = JSON.parse(doctor.available_slots_json || '[]');
+
+  if (rawSlots !== undefined) {
+    let slotsArray = rawSlots;
+    if (typeof rawSlots === 'string') {
+      try {
+        slotsArray = JSON.parse(rawSlots);
+      } catch {
+        return res.status(400).json({
+          success: false,
+          error: 'available_slots must be a valid JSON array of slot strings.',
+          code: 'INVALID_SLOTS_FORMAT',
+        });
+      }
+    }
+
+    if (!Array.isArray(slotsArray)) {
+      return res.status(400).json({
+        success: false,
+        error: 'available_slots must be an array of time slot strings.',
+        code: 'INVALID_SLOTS_FORMAT',
+      });
+    }
+
+    const slotRegex = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i;
+    const seenSlots = new Set();
+    const cleanSlots = [];
+
+    for (const slot of slotsArray) {
+      if (typeof slot !== 'string' || !slot.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Slot entries must be non-empty strings.',
+          code: 'INVALID_SLOT_ENTRY',
+        });
+      }
+      const trimmed = slot.trim();
+      const match = trimmed.match(slotRegex);
+      if (!match) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid slot format '${trimmed}'. Expected standard 12-hour format like '09:00 AM' or '2:30 PM'.`,
+          code: 'INVALID_SLOT_FORMAT',
+        });
+      }
+
+      const hour = parseInt(match[1], 10);
+      const min = parseInt(match[2], 10);
+      if (hour < 1 || hour > 12 || min < 0 || min > 59) {
+        return res.status(400).json({
+          success: false,
+          error: `Slot time '${trimmed}' has invalid hours or minutes.`,
+          code: 'INVALID_SLOT_TIME',
+        });
+      }
+
+      const normalizedSlot = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')} ${match[3].toUpperCase()}`;
+
+      if (seenSlots.has(normalizedSlot)) {
+        return res.status(400).json({
+          success: false,
+          error: `Duplicate slot '${normalizedSlot}' detected in schedule submission.`,
+          code: 'DUPLICATE_SLOT_DETECTED',
+        });
+      }
+      seenSlots.add(normalizedSlot);
+      cleanSlots.push(normalizedSlot);
+    }
+
+    // If intake enabled, require non-empty schedule
+    if (validatedAccepting && cleanSlots.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot enable patient intake with an empty schedule. Configure at least one appointment slot.',
+        code: 'SCHEDULE_REQUIRED_FOR_INTAKE',
+      });
+    }
+
+    // 4. Slot removal conflict check:
+    // Check if any removed slots have pending, requested, accepted, or confirmed upcoming appointments
+    const currentSlots = JSON.parse(doctor.available_slots_json || '[]').map(s => {
+      const m = s.match(slotRegex);
+      return m ? `${parseInt(m[1], 10).toString().padStart(2, '0')}:${m[2]} ${m[3].toUpperCase()}` : s.trim();
+    });
+
+    const removedSlots = currentSlots.filter(s => !cleanSlots.includes(s));
+
+    if (removedSlots.length > 0) {
+      const todayStr = getTodayDateString();
+      for (const removed of removedSlots) {
+        const unpadded = removed.replace(/^0/, '');
+        const padded = removed.match(/^[1-9]:/) ? `0${removed}` : removed;
+        const conflict = db.get(
+          `SELECT COUNT(*) as count, MIN(requested_date) as earliest_date
+           FROM appointment_requests
+           WHERE doctor_id = ?
+             AND preferred_slot IN (?, ?, ?)
+             AND status IN ('pending', 'requested', 'accepted', 'confirmed')
+             AND (requested_date >= ? OR requested_date IS NULL)`,
+          [doctor.id, removed, unpadded, padded, todayStr]
+        );
+
+        if (conflict && conflict.count > 0) {
+          return res.status(409).json({
+            success: false,
+            error: `Cannot remove slot '${removed}' because there are ${conflict.count} active upcoming appointment(s) scheduled for this time (earliest: ${conflict.earliest_date || todayStr}). Please resolve or reschedule these visits before removing the slot.`,
+            code: 'SLOT_REMOVAL_CONFLICT',
+          });
+        }
+      }
+    }
+
+    validatedSlots = cleanSlots;
+  } else {
+    if (validatedAccepting && validatedSlots.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot enable patient intake with an empty schedule. Configure at least one appointment slot.',
+        code: 'SCHEDULE_REQUIRED_FOR_INTAKE',
+      });
+    }
+  }
+
+  // 5. Atomic Transaction & Audit Log
+  const slotsJson = JSON.stringify(validatedSlots);
+  const acceptingInt = validatedAccepting ? 1 : 0;
+
+  db.transaction((tx) => {
+    tx.run(
+      `UPDATE doctor_profiles
+       SET is_accepting_new_patients = ?,
+           available_slots_json = ?,
+           updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`,
+      [acceptingInt, slotsJson, doctor.id, req.user.id]
+    );
+
+    tx.run(
+      `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
+       VALUES (?, 'DOCTOR_AVAILABILITY_UPDATED', 'DOCTOR', ?, ?, ?)`,
+      [
+        req.user.id,
+        doctor.id,
+        JSON.stringify({
+          isAcceptingNewPatients: validatedAccepting,
+          slotsCount: validatedSlots.length,
+          slots: validatedSlots
+        }),
+        req.ip || '127.0.0.1'
+      ]
+    );
+  });
+
+  const updated = db.get(`SELECT * FROM doctor_profiles WHERE id = ?`, [doctor.id]);
+
+  res.status(200).json({
+    success: true,
+    message: validatedAccepting
+      ? `Intake opened with ${validatedSlots.length} available slots.`
+      : `Intake paused. Existing appointments remain active.`,
+    data: {
+      isAcceptingNewPatients: Boolean(updated.is_accepting_new_patients),
+      availableSlots: JSON.parse(updated.available_slots_json || '[]'),
+    }
+  });
+});
 
 export default router;

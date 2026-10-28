@@ -134,6 +134,297 @@ router.get('/dashboard', (req, res) => {
 });
 
 /**
+ * GET /api/patient/profile
+ * Returns authenticated patient's profile
+ */
+router.get('/profile', (req, res) => {
+  const patientProfile = db.get(
+    `SELECT id, user_id, full_name, phone, date_of_birth, gender, emergency_contact, city, is_synthetic, created_at, updated_at
+     FROM patient_profiles WHERE user_id = ?`,
+    [req.user.id]
+  );
+
+  if (!patientProfile) {
+    return res.status(404).json({
+      success: false,
+      error: 'Patient profile not found for authenticated user.',
+      code: 'PROFILE_NOT_FOUND',
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    data: patientProfile,
+  });
+});
+
+/**
+ * PUT /api/patient/profile
+ * Updates authenticated patient's profile.
+ * Rejects protected/unknown fields, validates formats, updates atomically,
+ * and records PATIENT_PROFILE_UPDATED audit log.
+ */
+router.put('/profile', (req, res) => {
+  const patientProfile = db.get(
+    `SELECT * FROM patient_profiles WHERE user_id = ?`,
+    [req.user.id]
+  );
+
+  if (!patientProfile) {
+    return res.status(404).json({
+      success: false,
+      error: 'Patient profile not found for authenticated user.',
+      code: 'PROFILE_NOT_FOUND',
+    });
+  }
+
+  // Guard against mass-assignment and unexpected fields
+  const allowedFields = new Set([
+    'full_name',
+    'phone',
+    'gender',
+    'date_of_birth',
+    'emergency_contact',
+    'city',
+  ]);
+
+  const providedKeys = Object.keys(req.body);
+  for (const key of providedKeys) {
+    if (!allowedFields.has(key)) {
+      return res.status(400).json({
+        success: false,
+        error: `Field '${key}' is not allowed for patient profile updates.`,
+        code: 'DISALLOWED_FIELD',
+      });
+    }
+  }
+
+  // 1. Validate full_name
+  let newFullName = patientProfile.full_name;
+  if (req.body.full_name !== undefined) {
+    if (typeof req.body.full_name !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Full name must be a string.',
+        code: 'INVALID_FULL_NAME',
+      });
+    }
+    const trimmedName = req.body.full_name.trim();
+    if (trimmedName.length < 2 || trimmedName.length > 100) {
+      return res.status(400).json({
+        success: false,
+        error: 'Full name must be between 2 and 100 characters.',
+        code: 'INVALID_FULL_NAME',
+      });
+    }
+    newFullName = trimmedName;
+  }
+
+  // 2. Validate phone
+  let newPhone = patientProfile.phone;
+  if (req.body.phone !== undefined) {
+    if (req.body.phone === null || req.body.phone === '') {
+      newPhone = null; // Cleared
+    } else {
+      if (typeof req.body.phone !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone must be a string or null.',
+          code: 'INVALID_PHONE',
+        });
+      }
+      const trimmedPhone = req.body.phone.trim();
+      const phoneRegex = /^[+0-9()\-\s]{7,25}$/;
+      const digitsOnly = trimmedPhone.replace(/\D/g, '');
+      if (!phoneRegex.test(trimmedPhone) || digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone number must be between 7 and 25 characters and contain only digits, spaces, dashes, parentheses, or a leading +.',
+          code: 'INVALID_PHONE',
+        });
+      }
+      newPhone = trimmedPhone;
+    }
+  }
+
+  // 3. Validate gender
+  let newGender = patientProfile.gender;
+  if (req.body.gender !== undefined) {
+    if (req.body.gender === null || req.body.gender === '') {
+      newGender = 'Prefer not to say';
+    } else {
+      const allowedGenders = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
+      if (!allowedGenders.includes(req.body.gender)) {
+        return res.status(400).json({
+          success: false,
+          error: `Gender must be one of: ${allowedGenders.join(', ')}.`,
+          code: 'INVALID_GENDER',
+        });
+      }
+      newGender = req.body.gender;
+    }
+  }
+
+  // 4. Validate date_of_birth
+  let newDob = patientProfile.date_of_birth;
+  if (req.body.date_of_birth !== undefined) {
+    if (req.body.date_of_birth === null || req.body.date_of_birth === '') {
+      newDob = null;
+    } else {
+      if (typeof req.body.date_of_birth !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Date of birth must be a string in YYYY-MM-DD format.',
+          code: 'INVALID_DOB_FORMAT',
+        });
+      }
+      const trimmedDob = req.body.date_of_birth.trim();
+      const dobMatch = trimmedDob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!dobMatch) {
+        return res.status(400).json({
+          success: false,
+          error: 'Date of birth must follow YYYY-MM-DD format.',
+          code: 'INVALID_DOB_FORMAT',
+        });
+      }
+
+      const year = parseInt(dobMatch[1], 10);
+      const month = parseInt(dobMatch[2], 10);
+      const day = parseInt(dobMatch[3], 10);
+      const dobDate = new Date(year, month - 1, day);
+
+      if (
+        isNaN(dobDate.getTime()) ||
+        dobDate.getFullYear() !== year ||
+        dobDate.getMonth() !== month - 1 ||
+        dobDate.getDate() !== day
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Date of birth represents an invalid calendar date.',
+          code: 'INVALID_DOB_CALENDAR',
+        });
+      }
+
+      const today = getTodayDateString();
+      if (trimmedDob > today) {
+        return res.status(400).json({
+          success: false,
+          error: 'Date of birth cannot be in the future.',
+          code: 'FUTURE_DOB_NOT_ALLOWED',
+        });
+      }
+
+      if (year < 1900) {
+        return res.status(400).json({
+          success: false,
+          error: 'Date of birth year cannot be earlier than 1900.',
+          code: 'INVALID_DOB_RANGE',
+        });
+      }
+
+      newDob = trimmedDob;
+    }
+  }
+
+  // 5. Validate emergency_contact
+  let newEmergencyContact = patientProfile.emergency_contact;
+  if (req.body.emergency_contact !== undefined) {
+    if (req.body.emergency_contact === null || req.body.emergency_contact === '') {
+      newEmergencyContact = null;
+    } else {
+      if (typeof req.body.emergency_contact !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Emergency contact must be a string or null.',
+          code: 'INVALID_EMERGENCY_CONTACT',
+        });
+      }
+      const trimmedContact = req.body.emergency_contact.trim();
+      if (trimmedContact.length > 200) {
+        return res.status(400).json({
+          success: false,
+          error: 'Emergency contact must not exceed 200 characters.',
+          code: 'INVALID_EMERGENCY_CONTACT_LENGTH',
+        });
+      }
+      newEmergencyContact = trimmedContact;
+    }
+  }
+
+  // 6. Validate city
+  let newCity = patientProfile.city;
+  if (req.body.city !== undefined) {
+    if (req.body.city === null || req.body.city === '') {
+      newCity = 'Chandigarh';
+    } else {
+      if (typeof req.body.city !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'City must be a string.',
+          code: 'INVALID_CITY',
+        });
+      }
+      const trimmedCity = req.body.city.trim();
+      if (trimmedCity.length < 2 || trimmedCity.length > 100) {
+        return res.status(400).json({
+          success: false,
+          error: 'City must be between 2 and 100 characters.',
+          code: 'INVALID_CITY_LENGTH',
+        });
+      }
+      newCity = trimmedCity;
+    }
+  }
+
+  // Atomic update and audit logging
+  db.transaction((tx) => {
+    tx.run(
+      `UPDATE patient_profiles
+       SET full_name = ?,
+           phone = ?,
+           gender = ?,
+           date_of_birth = ?,
+           emergency_contact = ?,
+           city = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`,
+      [newFullName, newPhone, newGender, newDob, newEmergencyContact, newCity, patientProfile.id]
+    );
+
+    tx.run(
+      `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
+       VALUES (?, 'PATIENT_PROFILE_UPDATED', 'PATIENT_PROFILE', ?, ?, ?)`,
+      [
+        req.user.id,
+        patientProfile.id,
+        JSON.stringify({
+          fullName: newFullName,
+          phone: newPhone,
+          gender: newGender,
+          dob: newDob,
+          emergencyContact: newEmergencyContact,
+          city: newCity,
+        }),
+        req.ip || '127.0.0.1',
+      ]
+    );
+  });
+
+  const updatedProfile = db.get(
+    `SELECT id, user_id, full_name, phone, date_of_birth, gender, emergency_contact, city, is_synthetic, created_at, updated_at
+     FROM patient_profiles WHERE id = ?`,
+    [patientProfile.id]
+  );
+
+  return res.status(200).json({
+    success: true,
+    message: 'Patient profile updated successfully.',
+    data: updatedProfile,
+  });
+});
+
+/**
  * GET /api/patient/appointments
  * Dedicated endpoint returning list of appointments for authenticated patient
  */
