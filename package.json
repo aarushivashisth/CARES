@@ -8,9 +8,13 @@
     "dev:backend": "npm --prefix backend run dev",
     "start:frontend": "npm --prefix frontend run dev",
     "build:frontend": "npm --prefix frontend run build",
+    "build": "npm run build:frontend",
     "db:init": "npm --prefix backend run db:init",
     "db:seed": "npm --prefix backend run db:seed",
-    "test:backend": "npm --prefix backend test"
+    "test:backend": "npm --prefix backend test",
+    "test:frontend": "npm --prefix frontend test",
+    "test": "npm run test:backend && npm run test:frontend",
+    "lint": "npm --prefix frontend run lint"
   },
   "keywords": [
     "healthcare",

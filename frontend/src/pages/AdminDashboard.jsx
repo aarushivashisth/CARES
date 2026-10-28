@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext.jsx';
+import { useAuth } from '../context/useAuth.js';
 import { api } from '../services/apiClient.js';
 import './Dashboard.css';
 
@@ -35,8 +35,31 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    loadAdminData();
-  }, [loadAdminData]);
+    let isMounted = true;
+    async function init() {
+      try {
+        const [resDash, resVerif] = await Promise.all([
+          api.get('/admin/dashboard'),
+          api.get('/admin/verifications'),
+        ]);
+        if (!isMounted) return;
+        if (resDash.success) {
+          setData(resDash.data);
+        }
+        if (resVerif.success) {
+          setVerifications(resVerif.data.verifications || []);
+        }
+      } catch (err) {
+        if (isMounted) setError(err.message);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    init();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const openReviewModal = (app, action) => {
     setActiveModal({
@@ -445,6 +468,9 @@ export default function AdminDashboard() {
           }}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="review-modal-title"
             style={{
               background: '#ffffff',
               borderRadius: '10px',
@@ -454,7 +480,7 @@ export default function AdminDashboard() {
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
             }}
           >
-            <h3 style={{ margin: '0 0 8px', fontSize: '18px', color: '#1f2937' }}>
+            <h3 id="review-modal-title" style={{ margin: '0 0 8px', fontSize: '18px', color: '#1f2937' }}>
               Confirm Review Action: <span style={{ textTransform: 'capitalize' }}>{activeModal.action}</span>
             </h3>
             <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#4b5563' }}>

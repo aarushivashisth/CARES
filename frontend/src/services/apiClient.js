@@ -35,7 +35,7 @@ export async function apiRequest(endpoint, options = {}) {
     return data;
   } catch (err) {
     if (err.name === 'TypeError' && err.message.includes('fetch')) {
-      const connErr = new Error('Cannot connect to CARES backend server. Please verify backend is running on port 5000.');
+      const connErr = new Error('Unable to connect to the CARES platform API. Please ensure the backend service is running and accessible.');
       connErr.code = 'BACKEND_UNAVAILABLE';
       throw connErr;
     }

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext.jsx';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '../context/useAuth.js';
 import { api } from '../services/apiClient.js';
 import { Link } from 'react-router-dom';
 import './Dashboard.css';
@@ -26,6 +26,9 @@ export default function PatientDashboard() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileModalError, setProfileModalError] = useState(null);
 
+  const modalRef = useRef(null);
+  const triggerRef = useRef(null);
+
   const loadDashboard = useCallback(async () => {
     try {
       setError(null);
@@ -41,8 +44,26 @@ export default function PatientDashboard() {
   }, []);
 
   useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
+    let isMounted = true;
+    async function init() {
+      try {
+        setError(null);
+        const res = await api.get('/patient/dashboard');
+        if (!isMounted) return;
+        if (res.success) {
+          setData(res.data);
+        }
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load patient portal data.');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    init();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleCancelAppointment = async (appt) => {
     const isConfirmed = window.confirm(
@@ -82,7 +103,8 @@ export default function PatientDashboard() {
     }
   };
 
-  const handleOpenEditProfile = () => {
+  const handleOpenEditProfile = (e) => {
+    triggerRef.current = e?.currentTarget || document.activeElement;
     if (data?.profile) {
       setProfileForm({
         full_name: data.profile.full_name || '',
@@ -97,6 +119,73 @@ export default function PatientDashboard() {
     setProfileModalError(null);
     setIsEditingProfile(true);
   };
+
+  const handleCloseEditProfile = () => {
+    setIsEditingProfile(false);
+    setProfileErrors({});
+    setProfileModalError(null);
+    setTimeout(() => {
+      triggerRef.current?.focus?.();
+    }, 0);
+  };
+
+  // Keyboard accessibility: Escape to dismiss, initial focus, and Tab focus trap
+  useEffect(() => {
+    if (!isEditingProfile) return;
+
+    const focusTimer = setTimeout(() => {
+      if (modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll(
+          'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length > 0) {
+          focusable[0].focus();
+        }
+      }
+    }, 10);
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCloseEditProfile();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusables = Array.from(
+          modalRef.current.querySelectorAll(
+            'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        );
+
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+
+        const firstElement = focusables[0];
+        const lastElement = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement || !modalRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          if (document.activeElement === lastElement || !modalRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      clearTimeout(focusTimer);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isEditingProfile]);
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
@@ -157,7 +246,7 @@ export default function PatientDashboard() {
           ...prev,
           profile: res.data,
         }));
-        setIsEditingProfile(false);
+        handleCloseEditProfile();
         setActionNotice({
           type: 'success',
           message: 'Your patient profile has been updated successfully.',
@@ -409,17 +498,29 @@ export default function PatientDashboard() {
         </>
       )}
 
-      {/* Milestone 6: Accessible Edit Profile Modal */}
+      {/* Milestone 6 & 7: Accessible Edit Profile Modal */}
       {isEditingProfile && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="edit-profile-title">
+        <div
+          ref={modalRef}
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-profile-title"
+          aria-describedby="edit-profile-desc"
+        >
           <div className="modal-content">
             <div className="modal-header">
-              <h2 id="edit-profile-title">Edit Patient Profile</h2>
+              <div>
+                <h2 id="edit-profile-title">Edit Patient Profile</h2>
+                <p id="edit-profile-desc" style={{ fontSize: '12px', color: '#68776e', margin: '2px 0 0' }}>
+                  Update your personal and emergency contact details.
+                </p>
+              </div>
               <button
                 type="button"
                 className="modal-close-btn"
                 aria-label="Close modal"
-                onClick={() => setIsEditingProfile(false)}
+                onClick={handleCloseEditProfile}
               >
                 ✕
               </button>
@@ -542,7 +643,7 @@ export default function PatientDashboard() {
                   type="button"
                   className="secondary-button"
                   disabled={profileSaving}
-                  onClick={() => setIsEditingProfile(false)}
+                  onClick={handleCloseEditProfile}
                 >
                   Cancel
                 </button>

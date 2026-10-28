@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext.jsx';
+import { useAuth } from '../context/useAuth.js';
 import { api } from '../services/apiClient.js';
 import './Dashboard.css';
 
@@ -68,8 +68,46 @@ export default function HospitalDashboard() {
   }, []);
 
   useEffect(() => {
-    loadHospitalData();
-  }, [loadHospitalData]);
+    let isMounted = true;
+    async function init() {
+      try {
+        setError(null);
+        const res = await api.get('/hospital/dashboard');
+        if (!isMounted) return;
+        if (res.success) {
+          setData(res.data);
+          const fac = res.data.facility;
+          let opHours = { regular: '08:00 - 20:00', emergency: '24/7 Everyday' };
+          if (fac?.operating_hours_json) {
+            try {
+              opHours = JSON.parse(fac.operating_hours_json);
+            } catch {
+              opHours = { regular: fac.operating_hours_json, emergency: '24/7' };
+            }
+          }
+          setProfileForm({
+            name: fac?.name || '',
+            address: fac?.address || '',
+            city: fac?.city || '',
+            state: fac?.state || '',
+            phone: fac?.phone || '',
+            website_url: fac?.website_url || '',
+            regularHours: opHours?.regular || opHours?.opd || '08:00 - 20:00',
+            emergencyHours: opHours?.emergency || '24/7 Everyday',
+            emergency_available: Boolean(fac?.emergency_available),
+          });
+        }
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load facility data');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    init();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleProfileSave = async (e) => {
     e.preventDefault();
@@ -544,14 +582,17 @@ export default function HospitalDashboard() {
                 <h2>Clinical Departments</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {data?.facility?.departments && data.facility.departments.length > 0 ? (
-                    data.facility.departments.map((dept) => (
-                      <div key={dept.name} style={{ borderBottom: '1px solid #edf1eb', paddingBottom: '8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                          <strong>{dept.name}</strong>
-                          <span style={{ color: '#68776e', fontSize: '11px' }}>Standard Outpatient</span>
+                    data.facility.departments.map((dept, index) => {
+                      const deptName = typeof dept === 'string' ? dept : (dept.name || `Dept-${index}`);
+                      return (
+                        <div key={deptName} style={{ borderBottom: '1px solid #edf1eb', paddingBottom: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                            <strong>{deptName}</strong>
+                            <span style={{ color: '#68776e', fontSize: '11px' }}>Standard Outpatient</span>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <p style={{ color: '#68776e', fontSize: '13px' }}>Departments configured on facility record.</p>
                   )}

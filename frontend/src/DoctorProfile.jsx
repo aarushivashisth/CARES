@@ -1,14 +1,13 @@
 import { useState, useEffect } from "react";
-import { Link, useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./services/apiClient.js";
-import { useAuth } from "./context/AuthContext.jsx";
+import { useAuth } from "./context/useAuth.js";
 import { doctors as fallbackDoctors } from "./doctorData.js";
 import "./DoctorProfile.css";
 
 export default function DoctorProfile() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const { user } = useAuth();
 
   const [doctor, setDoctor] = useState(null);
@@ -46,8 +45,8 @@ export default function DoctorProfile() {
         if (isMounted) {
           if (response && response.success && response.data) {
             setDoctor(response.data);
-            if (!selectedSlot && response.data.slots && response.data.slots.length > 0) {
-              setSelectedSlot(response.data.slots[0]);
+            if (response.data.slots && response.data.slots.length > 0) {
+              setSelectedSlot((prev) => prev || response.data.slots[0]);
             }
           } else {
             setNotFound(true);
@@ -63,8 +62,8 @@ export default function DoctorProfile() {
             const fallback = fallbackDoctors.find((item) => String(item.id) === String(id));
             if (fallback) {
               setDoctor(fallback);
-              if (!selectedSlot && fallback.slots && fallback.slots.length > 0) {
-                setSelectedSlot(fallback.slots[0]);
+              if (fallback.slots && fallback.slots.length > 0) {
+                setSelectedSlot((prev) => prev || fallback.slots[0]);
               }
             } else {
               setError(err.message || "Failed to load doctor profile.");
@@ -151,7 +150,7 @@ export default function DoctorProfile() {
           <p className="profile-eyebrow">CARES DIRECTORY</p>
           <h1>Doctor not found</h1>
           <p>
-            No provider with ID #{id} exists in our database directory. Please check the ID or search the directory.
+            {error || `No provider with ID #${id} exists in our database directory. Please check the ID or search the directory.`}
           </p>
           <Link className="profile-primary-button" to="/doctors">
             Back to doctors

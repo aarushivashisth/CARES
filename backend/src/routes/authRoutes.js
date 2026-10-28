@@ -5,6 +5,7 @@ import { db } from '../db/connection.js';
 import { config } from '../config/env.js';
 import { validateBody } from '../middleware/validateMiddleware.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
+import { authRateLimiter } from '../middleware/rateLimitMiddleware.js';
 import { logger } from '../utils/logger.js';
 
 const router = Router();
@@ -51,6 +52,7 @@ function getUserProfile(userId, role) {
  */
 router.post(
   '/login',
+  authRateLimiter,
   validateBody({
     email: { required: true, type: 'email' },
     password: { required: true, minLength: 6 }
@@ -150,6 +152,7 @@ router.post(
  */
 router.post(
   '/register',
+  authRateLimiter,
   validateBody({
     email: { required: true, type: 'email' },
     password: { required: true, minLength: 6 },

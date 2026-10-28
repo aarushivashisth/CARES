@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import DoctorDiscovery from '../DoctorDiscovery.jsx';
 import DoctorProfile from '../DoctorProfile.jsx';
 import { api } from '../services/apiClient.js';
-import * as AuthContextModule from '../context/AuthContext.jsx';
+import * as AuthContextModule from '../context/useAuth.js';
 
 // Mock AuthContext
 vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({

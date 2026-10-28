@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "./services/apiClient.js";
-import { normalizeDepartmentName } from "./HospitalDiscovery.jsx";
+import { normalizeDepartmentName } from "./utils/hospitalUtils.js";
 import "./HospitalDetail.css";
 
 export default function HospitalDetail() {
@@ -14,15 +14,17 @@ export default function HospitalDetail() {
   useEffect(() => {
     let isMounted = true;
 
-    // Validate ID format before calling backend
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId) || numericId <= 0 || String(numericId) !== String(id).trim()) {
-      setNotFound(true);
-      setLoading(false);
-      return;
-    }
+    async function loadFacility() {
+      // Validate ID format before calling backend
+      const numericId = parseInt(id, 10);
+      if (isNaN(numericId) || numericId <= 0 || String(numericId) !== String(id).trim()) {
+        if (isMounted) {
+          setNotFound(true);
+          setLoading(false);
+        }
+        return;
+      }
 
-    (async () => {
       try {
         setLoading(true);
         setError(null);
@@ -50,7 +52,9 @@ export default function HospitalDetail() {
           setLoading(false);
         }
       }
-    })();
+    }
+
+    loadFacility();
 
     return () => {
       isMounted = false;

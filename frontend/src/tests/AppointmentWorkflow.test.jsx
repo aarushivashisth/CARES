@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import React from 'react';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import DoctorProfile from '../DoctorProfile.jsx';
 import PatientDashboard from '../pages/PatientDashboard.jsx';
 import DoctorDashboard from '../pages/DoctorDashboard.jsx';
 import { api } from '../services/apiClient.js';
-import * as AuthContextModule from '../context/AuthContext.jsx';
+import * as AuthContextModule from '../context/useAuth.js';
 
 describe('Milestone 5: Automated Frontend Appointment Workflow Component Tests', () => {
   beforeEach(() => {
@@ -502,6 +501,60 @@ describe('Milestone 5: Automated Frontend Appointment Workflow Component Tests',
         expect(screen.queryByRole('dialog')).toBeNull();
         expect(screen.getByText('Ananya Sharma Updated')).toBeTruthy();
         expect(screen.getAllByText('Mohali').length).toBeGreaterThan(0);
+      });
+    });
+
+    it('closes Edit Profile modal on Escape key press and restores focus', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: { id: 10, email: 'patient@cares.org', role: 'patient' },
+        isAuthenticated: true,
+        logout: vi.fn(),
+      });
+
+      const mockPatientDash = {
+        profile: {
+          id: 1,
+          full_name: 'Ananya Sharma',
+          phone: '555-0192',
+          gender: 'Female',
+          date_of_birth: '1992-05-14',
+          emergency_contact: 'Vikram Sharma (555-0193)',
+          city: 'Chandigarh',
+        },
+        metrics: { totalAppointments: 0, pendingRequests: 0, acceptedAppointments: 0, declinedAppointments: 0 },
+        appointments: [],
+      };
+
+      vi.spyOn(api, 'get').mockResolvedValue({
+        success: true,
+        data: mockPatientDash,
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/patient/dashboard']}>
+          <PatientDashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Ananya Sharma')).toBeTruthy();
+      });
+
+      // Open Edit Profile modal
+      const editButtons = screen.getAllByText(/Edit/i);
+      const editBtn = editButtons[0];
+      editBtn.focus();
+      fireEvent.click(editBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeTruthy();
+      });
+
+      // Press Escape
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
       });
     });
   });

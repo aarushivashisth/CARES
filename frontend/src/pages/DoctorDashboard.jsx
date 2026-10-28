@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext.jsx';
+import { useAuth } from '../context/useAuth.js';
 import { api } from '../services/apiClient.js';
 import './Dashboard.css';
 
@@ -46,6 +46,26 @@ export default function DoctorDashboard() {
       ]);
       if (resDash.success) {
         setData(resDash.data);
+        if (resDash.data?.profile) {
+          const prof = resDash.data.profile;
+          setPracticeBio(prof.bio || '');
+          setPracticeFee(
+            prof.consultationFee !== undefined && prof.consultationFee !== null
+              ? prof.consultationFee
+              : 500
+          );
+          setPracticeLanguages(
+            Array.isArray(prof.languages) && prof.languages.length > 0
+              ? prof.languages
+              : ['English', 'Hindi']
+          );
+          setPracticeVisitTypes(
+            Array.isArray(prof.visitTypes) && prof.visitTypes.length > 0
+              ? prof.visitTypes
+              : ['In-person', 'Video consultation']
+          );
+          setPracticeAccessible(Boolean(prof.isWheelchairAccessible));
+        }
       }
       if (resVerif.success) {
         setVerificationData(resVerif.data);
@@ -66,30 +86,60 @@ export default function DoctorDashboard() {
   }, []);
 
   useEffect(() => {
-    loadDoctorData();
-  }, [loadDoctorData]);
-
-  useEffect(() => {
-    if (data?.profile) {
-      setPracticeBio(data.profile.bio || '');
-      setPracticeFee(
-        data.profile.consultationFee !== undefined && data.profile.consultationFee !== null
-          ? data.profile.consultationFee
-          : 500
-      );
-      setPracticeLanguages(
-        Array.isArray(data.profile.languages) && data.profile.languages.length > 0
-          ? data.profile.languages
-          : ['English', 'Hindi']
-      );
-      setPracticeVisitTypes(
-        Array.isArray(data.profile.visitTypes) && data.profile.visitTypes.length > 0
-          ? data.profile.visitTypes
-          : ['In-person', 'Video consultation']
-      );
-      setPracticeAccessible(Boolean(data.profile.isWheelchairAccessible));
+    let isMounted = true;
+    async function init() {
+      try {
+        setError(null);
+        const [resDash, resVerif] = await Promise.all([
+          api.get('/doctor/portal/dashboard'),
+          api.get('/doctor/portal/verification'),
+        ]);
+        if (!isMounted) return;
+        if (resDash.success) {
+          setData(resDash.data);
+          if (resDash.data?.profile) {
+            const prof = resDash.data.profile;
+            setPracticeBio(prof.bio || '');
+            setPracticeFee(
+              prof.consultationFee !== undefined && prof.consultationFee !== null
+                ? prof.consultationFee
+                : 500
+            );
+            setPracticeLanguages(
+              Array.isArray(prof.languages) && prof.languages.length > 0
+                ? prof.languages
+                : ['English', 'Hindi']
+            );
+            setPracticeVisitTypes(
+              Array.isArray(prof.visitTypes) && prof.visitTypes.length > 0
+                ? prof.visitTypes
+                : ['In-person', 'Video consultation']
+            );
+            setPracticeAccessible(Boolean(prof.isWheelchairAccessible));
+          }
+        }
+        if (resVerif.success) {
+          setVerificationData(resVerif.data);
+          if (resVerif.data?.doctor) {
+            setVForm(prev => ({
+              ...prev,
+              licenseNumber: resVerif.data.doctor.licenseNumber || '',
+              issuingCouncil: resVerif.data.doctor.issuingCouncil || '',
+              qualifications: resVerif.data.doctor.qualifications || '',
+            }));
+          }
+        }
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load physician console.');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     }
-  }, [data]);
+    init();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Handle Intake Toggle (Pause/Reopen)
   const handleToggleIntake = async () => {

@@ -10,6 +10,8 @@ const { default: app } = await import('../src/app.js');
 const { seedDatabase } = await import('../src/db/seed.js');
 const { db } = await import('../src/db/connection.js');
 const { importLocalProviders, validateFacilityRecord, validateDoctorRecord } = await import('../src/scripts/importLocalProviders.js');
+const { validateJwtSecret, validateConfig, buildConfig, DEVELOPMENT_JWT_SECRET } = await import('../src/config/env.js');
+const { createAuthRateLimiter } = await import('../src/middleware/rateLimitMiddleware.js');
 
 let server;
 let baseUrl;
@@ -2203,4 +2205,126 @@ test('Milestone 6: Patient profile update succeeds, enforces strict isolation, a
 
   // Verify patient appointments remain intact
   assert.ok(Array.isArray(p1CheckData.data.appointments));
+});
+
+test('Milestone 7: Production JWT configuration enforcement rejects unsafe secrets and accepts valid keys', () => {
+  // 1. Missing or blank secret in production throws
+  assert.throws(
+    () => validateJwtSecret('', 'production'),
+    /FATAL: JWT_SECRET environment variable is missing or blank/
+  );
+  assert.throws(
+    () => validateJwtSecret('   ', 'production'),
+    /FATAL: JWT_SECRET environment variable is missing or blank/
+  );
+  assert.throws(
+    () => validateJwtSecret(null, 'production'),
+    /FATAL: JWT_SECRET environment variable is missing or blank/
+  );
+
+  // 2. Known development fallback secret in production throws
+  assert.throws(
+    () => validateJwtSecret(DEVELOPMENT_JWT_SECRET, 'production'),
+    /FATAL: Insecure development JWT_SECRET cannot be used in production mode/
+  );
+
+  // 3. Short secret (< 32 chars) in production throws
+  assert.throws(
+    () => validateJwtSecret('short-secret-key-12345', 'production'),
+    /FATAL: JWT_SECRET must be at least 32 characters long in production/
+  );
+
+  // 4. Valid strong secret in production passes without error
+  const validProductionSecret = 'a_very_secure_and_long_production_jwt_secret_key_exceeding_32_characters';
+  assert.doesNotThrow(() => validateJwtSecret(validProductionSecret, 'production'));
+
+  // 5. Test buildConfig and validateConfig integration
+  const prodConfigUnsafe = buildConfig({ NODE_ENV: 'production', JWT_SECRET: DEVELOPMENT_JWT_SECRET });
+  assert.throws(() => validateConfig(prodConfigUnsafe), /Insecure development JWT_SECRET/);
+
+  const prodConfigValid = buildConfig({ NODE_ENV: 'production', JWT_SECRET: validProductionSecret });
+  assert.equal(validateConfig(prodConfigValid), true);
+
+  // 6. In development, missing secret safely uses fallback
+  const devConfig = buildConfig({ NODE_ENV: 'development' });
+  assert.equal(devConfig.jwtSecret, DEVELOPMENT_JWT_SECRET);
+});
+
+test('Milestone 7: HTTP security headers are enforced and X-Powered-By is disabled', async () => {
+  const res = await fetch(`${baseUrl}/api/health`);
+  assert.equal(res.status, 200);
+
+  // Assert X-Powered-By is strictly omitted
+  assert.equal(res.headers.get('x-powered-by'), null);
+
+  // Assert standard security headers
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(res.headers.get('x-frame-options'), 'DENY');
+  assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  assert.equal(res.headers.get('cross-origin-opener-policy'), 'same-origin');
+  assert.equal(res.headers.get('cross-origin-resource-policy'), 'cross-origin');
+
+  const csp = res.headers.get('content-security-policy');
+  assert.ok(csp && csp.includes("default-src 'none'"));
+
+  // Assert HSTS is set when request simulates HTTPS via proxy
+  const httpsRes = await fetch(`${baseUrl}/api/health`, {
+    headers: { 'x-forwarded-proto': 'https' },
+  });
+  const hsts = httpsRes.headers.get('strict-transport-security');
+  assert.ok(hsts && hsts.includes('max-age=31536000'));
+});
+
+test('Milestone 7: Authentication rate limiting rejects excessive requests with HTTP 429 and standard format', async () => {
+  // Create an isolated limiter to test threshold enforcement deterministically
+  const testLimiter = createAuthRateLimiter({
+    windowMs: 60000,
+    maxRequests: 3,
+    message: 'Too many authentication attempts for test.',
+  });
+
+  let nextCalled = 0;
+  const mockNext = () => { nextCalled += 1; };
+
+  const fakeReq = { ip: '192.168.1.100', socket: { remoteAddress: '192.168.1.100' } };
+  let lastStatus = 200;
+  let lastJson = null;
+  const headersSet = {};
+
+  const fakeRes = {
+    setHeader(key, val) { headersSet[key] = val; },
+    status(code) {
+      lastStatus = code;
+      return {
+        json(body) { lastJson = body; return body; },
+      };
+    },
+  };
+
+  // First 3 requests should pass
+  testLimiter(fakeReq, fakeRes, mockNext);
+  assert.equal(nextCalled, 1);
+  assert.equal(headersSet['RateLimit-Remaining'], 2);
+
+  testLimiter(fakeReq, fakeRes, mockNext);
+  assert.equal(nextCalled, 2);
+  assert.equal(headersSet['RateLimit-Remaining'], 1);
+
+  testLimiter(fakeReq, fakeRes, mockNext);
+  assert.equal(nextCalled, 3);
+  assert.equal(headersSet['RateLimit-Remaining'], 0);
+
+  // 4th request must be rejected with HTTP 429
+  testLimiter(fakeReq, fakeRes, mockNext);
+  assert.equal(nextCalled, 3); // next was NOT called
+  assert.equal(lastStatus, 429);
+  assert.equal(lastJson.success, false);
+  assert.equal(lastJson.code, 'TOO_MANY_REQUESTS');
+  assert.ok(lastJson.retryAfterSeconds > 0);
+  assert.ok(headersSet['Retry-After'] > 0);
+
+  // Limiter reset clears store
+  testLimiter.reset();
+  testLimiter(fakeReq, fakeRes, mockNext);
+  assert.equal(nextCalled, 4); // Passes again after reset
 });
