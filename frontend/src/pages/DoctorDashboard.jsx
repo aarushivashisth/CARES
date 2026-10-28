@@ -132,14 +132,40 @@ export default function DoctorDashboard() {
     }
   };
 
-  const handleStatusChange = async (appointmentId, newStatus) => {
+  const todayLocal = new Date().toLocaleDateString("en-CA");
+
+  const handleStatusChange = async (appointmentId, newStatus, customNotes = null) => {
+    let finalNotes = customNotes;
+
+    if (newStatus === 'declined' && finalNotes === null) {
+      const input = window.prompt('Please enter an optional reason for declining this request:');
+      if (input === null) return;
+      finalNotes = input.trim() || 'Provider schedule unavailable';
+    }
+
+    if (newStatus === 'cancelled' && finalNotes === null) {
+      const input = window.prompt('A cancellation reason is required (minimum 5 characters):');
+      if (input === null) return;
+      if (!input.trim() || input.trim().length < 5) {
+        alert('A cancellation reason of at least 5 characters is required.');
+        return;
+      }
+      finalNotes = input.trim();
+    }
+
+    if (newStatus === 'completed') {
+      const ok = window.confirm(`Mark appointment #${appointmentId} as completed?`);
+      if (!ok) return;
+      finalNotes = 'Consultation successfully completed';
+    }
+
     setUpdatingId(appointmentId);
     setActionNotice(null);
 
     try {
       const res = await api.patch(`/doctor/portal/appointments/${appointmentId}/status`, {
         status: newStatus,
-        notes: `Physician updated status to ${newStatus}`,
+        notes: finalNotes || `Physician updated status to ${newStatus}`,
       });
 
       if (res.success) {
@@ -147,7 +173,6 @@ export default function DoctorDashboard() {
           type: 'success',
           message: `Appointment #${appointmentId} has been successfully ${newStatus}.`,
         });
-        // Refresh appointment list to reflect current database status
         await loadDoctorData();
       } else {
         setActionNotice({
@@ -229,12 +254,16 @@ export default function DoctorDashboard() {
               </strong>
             </div>
             <div className="dashboard-metric-card">
-              <p>Patient Requests</p>
-              <strong>{data?.metrics?.totalRequests || (data?.appointments || []).length}</strong>
+              <p>Pending Review</p>
+              <strong>{data?.metrics?.pendingReview || 0}</strong>
             </div>
             <div className="dashboard-metric-card">
-              <p>Configured Slots</p>
-              <strong>{data?.profile?.slots?.length || 0} Slots</strong>
+              <p>Confirmed Visits</p>
+              <strong>{data?.metrics?.confirmed || 0}</strong>
+            </div>
+            <div className="dashboard-metric-card">
+              <p>Completed Visits</p>
+              <strong>{data?.metrics?.completed || 0}</strong>
             </div>
           </section>
 
@@ -264,6 +293,8 @@ export default function DoctorDashboard() {
                   <div className="dashboard-list">
                     {data.appointments.map((appt) => {
                       const isPending = appt.status === 'pending' || appt.status === 'requested';
+                      const isAccepted = appt.status === 'accepted' || appt.status === 'confirmed';
+                      const isFuture = Boolean(appt.requested_date && appt.requested_date > todayLocal);
                       const isBusy = updatingId === appt.id;
 
                       return (
@@ -279,6 +310,17 @@ export default function DoctorDashboard() {
                             <p style={{ marginTop: '4px', color: '#68776e' }}>
                               <strong>Type:</strong> {appt.visit_type} · <strong>Reason:</strong> {appt.reason_for_visit || 'Routine Consultation'}
                             </p>
+                            {appt.patient_phone && (
+                              <div className="dashboard-patient-contact">
+                                <span>📞 {appt.patient_phone}</span>
+                                {appt.patient_gender && <span>• Gender: {appt.patient_gender}</span>}
+                              </div>
+                            )}
+                            {appt.latest_notes && (
+                              <div className="dashboard-notes-box">
+                                <strong>Status Note:</strong> {appt.latest_notes}
+                              </div>
+                            )}
                           </div>
 
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
@@ -303,6 +345,28 @@ export default function DoctorDashboard() {
                                   onClick={() => handleStatusChange(appt.id, 'declined')}
                                 >
                                   {isBusy ? 'Saving...' : '✕ Decline'}
+                                </button>
+                              </div>
+                            )}
+
+                            {isAccepted && (
+                              <div className="dashboard-action-buttons">
+                                <button
+                                  type="button"
+                                  className="dashboard-complete-btn"
+                                  disabled={isBusy || isFuture}
+                                  title={isFuture ? `Can only complete visit on or after ${appt.requested_date}` : 'Mark consultation as completed'}
+                                  onClick={() => handleStatusChange(appt.id, 'completed')}
+                                >
+                                  {isBusy ? 'Saving...' : '✓ Complete'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="dashboard-cancel-btn"
+                                  disabled={isBusy}
+                                  onClick={() => handleStatusChange(appt.id, 'cancelled')}
+                                >
+                                  {isBusy ? 'Saving...' : 'Cancel Visit'}
                                 </button>
                               </div>
                             )}

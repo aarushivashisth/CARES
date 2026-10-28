@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS appointment_requests (
 CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointment_requests(patient_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_doctor ON appointment_requests(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointment_requests(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_accepted_slot ON appointment_requests(doctor_id, requested_date, preferred_slot) WHERE status IN ('accepted', 'confirmed');
 
 -- 5b. Appointment Status History Table (Audit trail of state transitions)
 CREATE TABLE IF NOT EXISTS appointment_status_history (

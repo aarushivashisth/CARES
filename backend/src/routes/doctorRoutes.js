@@ -148,6 +148,52 @@ router.get('/:id', (req, res) => {
  * GET /api/doctor/appointments
  * Protected doctor endpoint returning appointment requests assigned to this doctor
  */
+/**
+ * Helper to parse appointment date (YYYY-MM-DD) and slot time (e.g. "11:30 AM", "02:00 PM")
+ * into a local Date object.
+ */
+function parseAppointmentSlotDateTime(dateStr, slotStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const trimmedDate = dateStr.trim();
+  const trimmedSlot = typeof slotStr === 'string' ? slotStr.trim() : '';
+
+  const dateParts = trimmedDate.split('-');
+  if (dateParts.length !== 3) return null;
+  const year = parseInt(dateParts[0], 10);
+  const month = parseInt(dateParts[1], 10);
+  const day = parseInt(dateParts[2], 10);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+  const match = trimmedSlot.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) {
+    return new Date(year, month - 1, day, 23, 59, 59, 999);
+  }
+
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const meridiem = match[3] ? match[3].toUpperCase() : null;
+
+  if (meridiem === 'PM' && hours < 12) hours += 12;
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+
+  return new Date(year, month - 1, day, hours, minutes, 0, 0);
+}
+
+/**
+ * Helper to get local date string YYYY-MM-DD
+ */
+function getTodayDateString() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * GET /api/doctor/appointments
+ * Protected doctor endpoint returning appointment requests assigned to this doctor
+ */
 router.get('/portal/appointments', authenticateToken, requireRole('doctor'), (req, res) => {
   const doctor = db.get(
     `SELECT id FROM doctor_profiles WHERE user_id = ?`,
@@ -163,9 +209,14 @@ router.get('/portal/appointments', authenticateToken, requireRole('doctor'), (re
   }
 
   const appointments = db.all(
-    `SELECT 
-       a.id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.created_at,
-       p.full_name AS patient_name, p.phone AS patient_phone, p.gender AS patient_gender
+    `SELECT
+       a.id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.created_at, a.updated_at,
+       p.full_name AS patient_name, p.phone AS patient_phone, p.gender AS patient_gender,
+       (
+         SELECT notes FROM appointment_status_history
+         WHERE appointment_id = a.id
+         ORDER BY id DESC LIMIT 1
+       ) AS latest_notes
      FROM appointment_requests a
      JOIN patient_profiles p ON a.patient_id = p.id
      WHERE a.doctor_id = ?
@@ -181,8 +232,8 @@ router.get('/portal/appointments', authenticateToken, requireRole('doctor'), (re
 });
 
 /**
- * Handler for doctor updating appointment status (accept or decline)
- * Enforces ownership and validates allowed state transitions
+ * Handler for doctor updating appointment status (accept, decline, complete, cancel)
+ * Enforces doctor ownership, state machine transitions, accepted slot collision prevention, and audit history.
  */
 function handleStatusUpdate(req, res) {
   const appointmentId = parseInt(req.params.id, 10);
@@ -233,56 +284,168 @@ function handleStatusUpdate(req, res) {
     });
   }
 
-  // VALIDATE ALLOWED TRANSITIONS:
-  // Only pending or requested appointments can be accepted or declined
-  const isPending = appointment.status === 'pending' || appointment.status === 'requested';
-  if (!isPending) {
+  // Normalize target status
+  const normalizedTarget = status === 'confirmed' ? 'accepted' : status;
+  const currentStatus = appointment.status;
+
+  // Immutability of terminal states
+  if (['completed', 'declined', 'cancelled'].includes(currentStatus)) {
     return res.status(400).json({
       success: false,
-      error: `Cannot transition appointment from current status '${appointment.status}'. Only pending requests can be accepted or declined.`,
-      code: 'INVALID_STATUS_TRANSITION',
+      error: `Cannot transition appointment #${appointmentId} from terminal status '${currentStatus}'.`,
+      code: 'TERMINAL_STATUS_IMMUTABLE',
     });
   }
 
-  // Normalize target status
-  const normalizedStatus = status === 'confirmed' ? 'accepted' : status;
+  const todayStr = getTodayDateString();
 
-  db.transaction((tx) => {
-    tx.run(
-      `UPDATE appointment_requests
-       SET status = ?, updated_at = datetime('now')
-       WHERE id = ?`,
-      [normalizedStatus, appointmentId]
-    );
+  if (currentStatus === 'pending' || currentStatus === 'requested') {
+    if (!['accepted', 'declined'].includes(normalizedTarget)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid transition: pending appointment can only be accepted or declined, not '${normalizedTarget}'.`,
+        code: 'INVALID_STATUS_TRANSITION',
+      });
+    }
 
-    tx.run(
-      `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
-       VALUES (?, ?, ?, ?)`,
-      [
-        appointmentId,
-        normalizedStatus,
-        notes ? notes.trim() : `Appointment ${normalizedStatus} by Dr. ${doctor.full_name}`,
-        req.user.id,
-      ]
-    );
+    if (normalizedTarget === 'accepted') {
+      // Check if slot is already confirmed/accepted by another appointment for this doctor
+      const existingAccepted = db.get(
+        `SELECT id FROM appointment_requests
+         WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
+         AND status IN ('accepted', 'confirmed') AND id != ?`,
+        [doctor.id, appointment.requested_date, appointment.preferred_slot, appointmentId]
+      );
 
-    tx.run(
-      `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
-       VALUES (?, 'APPOINTMENT_STATUS_CHANGE', 'APPOINTMENT', ?, ?, ?)`,
-      [
-        req.user.id,
-        appointmentId,
-        JSON.stringify({ previousStatus: appointment.status, newStatus: normalizedStatus, notes }),
-        req.ip || '127.0.0.1',
-      ]
-    );
-  });
+      if (existingAccepted) {
+        return res.status(409).json({
+          success: false,
+          error: `Cannot accept appointment #${appointmentId}. The slot '${appointment.preferred_slot}' on ${appointment.requested_date} is already confirmed for another appointment (#${existingAccepted.id}).`,
+          code: 'SLOT_ALREADY_CONFIRMED',
+        });
+      }
+    }
+  } else if (currentStatus === 'accepted' || currentStatus === 'confirmed') {
+    if (!['completed', 'cancelled'].includes(normalizedTarget)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid transition: accepted appointment can only be marked completed or cancelled, not '${normalizedTarget}'.`,
+        code: 'INVALID_STATUS_TRANSITION',
+      });
+    }
+
+    if (normalizedTarget === 'completed') {
+      // Cannot mark completed before appointment date
+      if (appointment.requested_date && appointment.requested_date > todayStr) {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot mark appointment as completed before its scheduled date (${appointment.requested_date}). Today is ${todayStr}.`,
+          code: 'CANNOT_COMPLETE_FUTURE_APPOINTMENT',
+        });
+      }
+
+      // If scheduled for today, cannot mark completed before the appointment slot time
+      if (appointment.requested_date === todayStr && appointment.preferred_slot) {
+        const slotDateTime = parseAppointmentSlotDateTime(appointment.requested_date, appointment.preferred_slot);
+        if (slotDateTime && slotDateTime > new Date()) {
+          return res.status(400).json({
+            success: false,
+            error: `Cannot mark appointment as completed before its scheduled time (${appointment.preferred_slot}) on ${todayStr}.`,
+            code: 'CANNOT_COMPLETE_FUTURE_APPOINTMENT',
+          });
+        }
+      }
+    }
+
+    if (normalizedTarget === 'cancelled') {
+      // Cancellation requires a meaningful reason
+      if (!notes || typeof notes !== 'string' || notes.trim().length < 5) {
+        return res.status(400).json({
+          success: false,
+          error: 'A meaningful cancellation reason is required when cancelling an accepted appointment (minimum 5 characters).',
+          code: 'CANCELLATION_REASON_REQUIRED',
+        });
+      }
+    }
+  } else {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid appointment status '${currentStatus}'.`,
+      code: 'INVALID_STATUS',
+    });
+  }
+
+  // Notes length check
+  if (notes && typeof notes === 'string' && notes.length > 500) {
+    return res.status(400).json({
+      success: false,
+      error: 'Status update notes cannot exceed 500 characters.',
+      code: 'NOTES_TOO_LONG',
+    });
+  }
+
+  const finalNotes = notes ? notes.trim() : `Appointment ${normalizedTarget} by Dr. ${doctor.full_name}`;
+
+  try {
+    db.transaction((tx) => {
+      if (normalizedTarget === 'accepted') {
+        const inTxConflict = tx.get(
+          `SELECT id FROM appointment_requests
+           WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
+           AND status IN ('accepted', 'confirmed') AND id != ?`,
+          [doctor.id, appointment.requested_date, appointment.preferred_slot, appointmentId]
+        );
+        if (inTxConflict) {
+          const err = new Error(`Slot '${appointment.preferred_slot}' on ${appointment.requested_date} is already confirmed.`);
+          err.code = 'SLOT_ALREADY_CONFIRMED';
+          throw err;
+        }
+      }
+
+      tx.run(
+        `UPDATE appointment_requests
+         SET status = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+        [normalizedTarget, appointmentId]
+      );
+
+      tx.run(
+        `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
+         VALUES (?, ?, ?, ?)`,
+        [appointmentId, normalizedTarget, finalNotes, req.user.id]
+      );
+
+      tx.run(
+        `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
+         VALUES (?, 'APPOINTMENT_STATUS_CHANGE', 'APPOINTMENT', ?, ?, ?)`,
+        [
+          req.user.id,
+          appointmentId,
+          JSON.stringify({ previousStatus: currentStatus, newStatus: normalizedTarget, notes: finalNotes }),
+          req.ip || '127.0.0.1',
+        ]
+      );
+    });
+  } catch (err) {
+    if (
+      err.code === 'SLOT_ALREADY_CONFIRMED' ||
+      (err.message && err.message.includes('UNIQUE constraint')) ||
+      (err.code && String(err.code).includes('CONSTRAINT'))
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot accept appointment #${appointmentId}. The slot '${appointment.preferred_slot}' on ${appointment.requested_date} is already confirmed for another patient.`,
+        code: 'SLOT_ALREADY_CONFIRMED',
+      });
+    }
+    throw err;
+  }
 
   const updated = db.get(`SELECT * FROM appointment_requests WHERE id = ?`, [appointmentId]);
 
   res.status(200).json({
     success: true,
-    message: `Appointment request #${appointmentId} was successfully ${normalizedStatus}.`,
+    message: `Appointment request #${appointmentId} was successfully ${normalizedTarget}.`,
     data: updated,
   });
 }
@@ -296,7 +459,7 @@ router.patch(
   authenticateToken,
   requireRole('doctor'),
   validateBody({
-    status: { required: true, enum: ['accepted', 'confirmed', 'declined', 'cancelled'] },
+    status: { required: true, enum: ['accepted', 'confirmed', 'declined', 'cancelled', 'completed'] },
   }),
   handleStatusUpdate
 );
@@ -306,9 +469,78 @@ router.post(
   authenticateToken,
   requireRole('doctor'),
   validateBody({
-    status: { required: true, enum: ['accepted', 'confirmed', 'declined', 'cancelled'] },
+    status: { required: true, enum: ['accepted', 'confirmed', 'declined', 'cancelled', 'completed'] },
   }),
   handleStatusUpdate
+);
+
+/**
+ * GET /api/doctor/portal/appointments/:id/history
+ * Retrieve chronological status history and notes for a specific appointment
+ */
+router.get(
+  '/portal/appointments/:id/history',
+  authenticateToken,
+  requireRole('doctor'),
+  (req, res) => {
+    const appointmentId = parseInt(req.params.id, 10);
+    if (isNaN(appointmentId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid appointment ID.',
+        code: 'INVALID_APPOINTMENT_ID',
+      });
+    }
+
+    const doctor = db.get(
+      `SELECT id FROM doctor_profiles WHERE user_id = ?`,
+      [req.user.id]
+    );
+
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        error: 'Doctor profile not found.',
+        code: 'PROFILE_NOT_FOUND',
+      });
+    }
+
+    const appointment = db.get(
+      `SELECT id, doctor_id FROM appointment_requests WHERE id = ?`,
+      [appointmentId]
+    );
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Appointment request not found.',
+        code: 'APPOINTMENT_NOT_FOUND',
+      });
+    }
+
+    if (appointment.doctor_id !== doctor.id) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: You cannot view history for another provider\'s appointment.',
+        code: 'FORBIDDEN_APPOINTMENT_ACCESS',
+      });
+    }
+
+    const history = db.all(
+      `SELECT h.id, h.appointment_id, h.status, h.notes, h.created_at, u.role AS changed_by_role
+       FROM appointment_status_history h
+       LEFT JOIN users u ON h.changed_by_user_id = u.id
+       WHERE h.appointment_id = ?
+       ORDER BY h.id ASC`,
+      [appointmentId]
+    );
+
+    res.status(200).json({
+      success: true,
+      count: history.length,
+      data: history,
+    });
+  }
 );
 
 /**
@@ -331,9 +563,14 @@ router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, 
 
   // Get appointment requests for this doctor
   const appointments = db.all(
-    `SELECT 
-       a.id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.created_at,
-       p.full_name AS patient_name, p.phone AS patient_phone, p.gender AS patient_gender
+    `SELECT
+       a.id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.created_at, a.updated_at,
+       p.full_name AS patient_name, p.phone AS patient_phone, p.gender AS patient_gender,
+       (
+         SELECT notes FROM appointment_status_history
+         WHERE appointment_id = a.id
+         ORDER BY id DESC LIMIT 1
+       ) AS latest_notes
      FROM appointment_requests a
      JOIN patient_profiles p ON a.patient_id = p.id
      WHERE a.doctor_id = ?
@@ -346,6 +583,9 @@ router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, 
   ).length;
   const acceptedCount = appointments.filter(
     (a) => a.status === 'accepted' || a.status === 'confirmed'
+  ).length;
+  const completedCount = appointments.filter(
+    (a) => a.status === 'completed'
   ).length;
   const declinedCount = appointments.filter(
     (a) => a.status === 'declined' || a.status === 'cancelled'
@@ -396,6 +636,7 @@ router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, 
         totalRequests: appointments.length,
         pendingReview: pendingCount,
         confirmed: acceptedCount,
+        completed: completedCount,
         declined: declinedCount,
       },
       milestone: 'Milestone 3 Credential Verification & Hospital Management',

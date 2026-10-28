@@ -52,9 +52,37 @@ function applyMigrations() {
       ON doctor_profiles(license_number) 
       WHERE license_number IS NOT NULL AND TRIM(license_number) != '';
 
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_hospitals_name_unique 
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_hospitals_name_unique
       ON hospitals(LOWER(TRIM(name)));
     `);
+
+    // Safely check for conflicting legacy records before creating the unique index
+    try {
+      const duplicates = db.all(`
+        SELECT doctor_id, requested_date, preferred_slot, COUNT(*) as conflict_count,
+               GROUP_CONCAT(id) as appointment_ids
+        FROM appointment_requests
+        WHERE status IN ('accepted', 'confirmed')
+        GROUP BY doctor_id, requested_date, preferred_slot
+        HAVING COUNT(*) > 1
+      `);
+
+      if (duplicates && duplicates.length > 0) {
+        console.warn('⚠️ [Migration Warning] Cannot create unique index idx_unique_accepted_slot: conflicting accepted/confirmed appointments detected on legacy data:');
+        duplicates.forEach((d) => {
+          console.warn(`   - Doctor #${d.doctor_id}, Date: ${d.requested_date}, Slot: ${d.preferred_slot}, Conflicting Appointment IDs: [${d.appointment_ids}]`);
+        });
+        console.warn('   Manual remediation required: Review and adjust conflicting appointment records to non-conflicting statuses before the index can be applied.');
+      } else {
+        db.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_accepted_slot
+          ON appointment_requests(doctor_id, requested_date, preferred_slot)
+          WHERE status IN ('accepted', 'confirmed');
+        `);
+      }
+    } catch (migErr) {
+      console.warn(`⚠️ [Migration Notice] Could not create idx_unique_accepted_slot (${migErr.message}).`);
+    }
 
     // Check if appointment_requests CHECK constraint allows 'pending' and 'accepted'
     const apptTableSqlRow = db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='appointment_requests'");

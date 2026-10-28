@@ -20,8 +20,12 @@ export default function DoctorProfile() {
   const initialSlot = searchParams.get("slot") || "";
   const [selectedSlot, setSelectedSlot] = useState(initialSlot);
 
-  // Format today's local date YYYY-MM-DD
+  // Format today's local date YYYY-MM-DD and max 90-day booking horizon
   const todayLocal = new Date().toLocaleDateString("en-CA");
+  const maxDate = new Date();
+  maxDate.setDate(maxDate.getDate() + 90);
+  const maxDateLocal = maxDate.toLocaleDateString("en-CA");
+
   const [requestedDate, setRequestedDate] = useState(todayLocal);
   const [visitType, setVisitType] = useState("In-person");
   const [reason, setReason] = useState("");
@@ -100,6 +104,7 @@ export default function DoctorProfile() {
     try {
       const payload = {
         doctor_id: doctor.id,
+        hospital_id: doctor.hospital_id || doctor.hospitalId || undefined,
         preferred_slot: selectedSlot,
         requested_date: requestedDate,
         visit_type: visitType,
@@ -322,7 +327,16 @@ export default function DoctorProfile() {
             Choose a preferred date and time slot. Requests are sent directly to Dr. {doctor.name} for confirmation.
           </p>
 
-          {!user ? (
+          {!doctor.accepting ? (
+            <div style={{ padding: "16px", background: "#fef2f2", borderRadius: "8px", border: "1px solid #fecaca", margin: "16px 0" }}>
+              <p style={{ margin: "0 0 6px", fontSize: "14px", color: "#991b1b", fontWeight: 700 }}>
+                ⛔ Not Accepting New Patients
+              </p>
+              <p style={{ margin: 0, fontSize: "13px", color: "#7f1d1d" }}>
+                Dr. {doctor.name} is currently not accepting new patient appointment requests. Please explore other healthcare providers in our directory.
+              </p>
+            </div>
+          ) : !user ? (
             <div style={{ padding: "16px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0", margin: "16px 0" }}>
               <p style={{ margin: "0 0 12px", fontSize: "13px", color: "#166534" }}>
                 <strong>Patient Login Required:</strong> Please log in with your patient account to submit an appointment request.
@@ -350,10 +364,14 @@ export default function DoctorProfile() {
                   type="date"
                   className="profile-input"
                   min={todayLocal}
+                  max={maxDateLocal}
                   value={requestedDate}
                   onChange={(e) => setRequestedDate(e.target.value)}
                   required
                 />
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                  Booking horizon: Today through {maxDateLocal} (up to 90 days in advance)
+                </span>
               </div>
 
               <div className="profile-form-group">

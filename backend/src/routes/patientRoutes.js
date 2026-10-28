@@ -10,6 +10,37 @@ const router = Router();
 router.use(authenticateToken, requireRole('patient'));
 
 /**
+ * Helper to parse appointment date (YYYY-MM-DD) and slot time (e.g. "11:30 AM", "02:00 PM")
+ * into a local Date object.
+ */
+function parseAppointmentSlotDateTime(dateStr, slotStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const trimmedDate = dateStr.trim();
+  const trimmedSlot = typeof slotStr === 'string' ? slotStr.trim() : '';
+
+  const dateParts = trimmedDate.split('-');
+  if (dateParts.length !== 3) return null;
+  const year = parseInt(dateParts[0], 10);
+  const month = parseInt(dateParts[1], 10);
+  const day = parseInt(dateParts[2], 10);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+  const match = trimmedSlot.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) {
+    return new Date(year, month - 1, day, 23, 59, 59, 999);
+  }
+
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const meridiem = match[3] ? match[3].toUpperCase() : null;
+
+  if (meridiem === 'PM' && hours < 12) hours += 12;
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+
+  return new Date(year, month - 1, day, hours, minutes, 0, 0);
+}
+
+/**
  * Helper to get local date string YYYY-MM-DD
  */
 function getTodayDateString() {
@@ -18,6 +49,41 @@ function getTodayDateString() {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * Helper to get maximum allowable booking horizon date (default 90 days)
+ */
+function getBookingHorizonDateString(days = 90) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Shared query snippet to fetch patient appointments with full context
+ */
+function getPatientAppointments(patientId) {
+  return db.all(
+    `SELECT
+       a.id, a.patient_id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.is_demo_request, a.created_at, a.updated_at,
+       d.id AS doctor_id, d.full_name AS doctor_name, d.specialty AS doctor_specialty,
+       h.id AS hospital_id, h.name AS hospital_name,
+       (
+         SELECT notes FROM appointment_status_history
+         WHERE appointment_id = a.id
+         ORDER BY id DESC LIMIT 1
+       ) AS latest_notes
+     FROM appointment_requests a
+     JOIN doctor_profiles d ON a.doctor_id = d.id
+     LEFT JOIN hospitals h ON a.hospital_id = h.id
+     WHERE a.patient_id = ?
+     ORDER BY a.created_at DESC`,
+    [patientId]
+  );
 }
 
 /**
@@ -39,18 +105,7 @@ router.get('/dashboard', (req, res) => {
   }
 
   // Strict Isolation: Get ONLY appointments for this authenticated patient
-  const appointments = db.all(
-    `SELECT 
-       a.id, a.patient_id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.is_demo_request, a.created_at,
-       d.id AS doctor_id, d.full_name AS doctor_name, d.specialty AS doctor_specialty,
-       h.name AS hospital_name
-     FROM appointment_requests a
-     JOIN doctor_profiles d ON a.doctor_id = d.id
-     LEFT JOIN hospitals h ON a.hospital_id = h.id
-     WHERE a.patient_id = ?
-     ORDER BY a.created_at DESC`,
-    [patientProfile.id]
-  );
+  const appointments = getPatientAppointments(patientProfile.id);
 
   const pendingCount = appointments.filter(
     (a) => a.status === 'pending' || a.status === 'requested'
@@ -73,15 +128,42 @@ router.get('/dashboard', (req, res) => {
         acceptedAppointments: acceptedCount,
         declinedAppointments: declinedCount,
       },
-      milestone: 'Milestone 2 Database-Backed Appointments',
+      milestone: 'Milestone 5 Appointment Lifecycle & Collision Safeguards',
     },
+  });
+});
+
+/**
+ * GET /api/patient/appointments
+ * Dedicated endpoint returning list of appointments for authenticated patient
+ */
+router.get('/appointments', (req, res) => {
+  const patientProfile = db.get(
+    `SELECT id FROM patient_profiles WHERE user_id = ?`,
+    [req.user.id]
+  );
+
+  if (!patientProfile) {
+    return res.status(404).json({
+      success: false,
+      error: 'Patient profile not found for authenticated user.',
+      code: 'PROFILE_NOT_FOUND',
+    });
+  }
+
+  const appointments = getPatientAppointments(patientProfile.id);
+
+  res.status(200).json({
+    success: true,
+    count: appointments.length,
+    data: appointments,
   });
 });
 
 /**
  * POST /api/patient/appointments
  * Request an appointment with a doctor.
- * Validates doctor eligibility, past/invalid dates, prevents rapid duplicates,
+ * Validates doctor eligibility, configured slots, 90-day booking horizon, collision prevention,
  * and derives patient identity strictly from authenticated JWT context.
  */
 router.post(
@@ -118,7 +200,7 @@ router.post(
     }
 
     const doctor = db.get(
-      `SELECT id, full_name, is_accepting_new_patients FROM doctor_profiles WHERE id = ?`,
+      `SELECT id, full_name, is_accepting_new_patients, available_slots_json FROM doctor_profiles WHERE id = ?`,
       [parsedDoctorId]
     );
 
@@ -138,7 +220,32 @@ router.post(
       });
     }
 
-    // 3. Validate Date & Reject Past Times
+    // 3. Validate Slot against Doctor's Configured Schedule
+    let configuredSlots = [];
+    try {
+      configuredSlots = JSON.parse(doctor.available_slots_json || '[]');
+    } catch {
+      configuredSlots = [];
+    }
+
+    const normalizedSlot = typeof preferred_slot === 'string' ? preferred_slot.trim() : '';
+    if (!Array.isArray(configuredSlots) || configuredSlots.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: `${doctor.full_name} has no available appointment slots configured.`,
+        code: 'NO_CONFIGURED_SLOTS',
+      });
+    }
+
+    if (!configuredSlots.includes(normalizedSlot)) {
+      return res.status(400).json({
+        success: false,
+        error: `Selected slot '${normalizedSlot}' is not configured for ${doctor.full_name}. Available slots: ${configuredSlots.join(', ')}.`,
+        code: 'INVALID_SLOT_SELECTED',
+      });
+    }
+
+    // 4. Validate Date: Past Date & 90-Day Horizon
     const todayStr = getTodayDateString();
     const targetDate = requested_date ? requested_date.trim() : todayStr;
 
@@ -152,7 +259,7 @@ router.post(
       });
     }
 
-    // Reject past dates (compare YYYY-MM-DD string)
+    // Reject past dates
     if (targetDate < todayStr) {
       return res.status(400).json({
         success: false,
@@ -161,12 +268,75 @@ router.post(
       });
     }
 
-    // 4. Prevent duplicate rapid submissions (within 30 seconds for same slot and doctor)
+    // Reject past slots on today's date
+    if (targetDate === todayStr && normalizedSlot) {
+      const slotDateTime = parseAppointmentSlotDateTime(targetDate, normalizedSlot);
+      if (slotDateTime && slotDateTime <= new Date()) {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot book appointment slot '${normalizedSlot}' on ${todayStr} because this time has already passed.`,
+          code: 'PAST_APPOINTMENT_SLOT',
+        });
+      }
+    }
+
+    // Enforce 90-day booking horizon
+    const maxHorizonDate = getBookingHorizonDateString(90);
+    if (targetDate > maxHorizonDate) {
+      return res.status(400).json({
+        success: false,
+        error: `Requested appointment date (${targetDate}) exceeds maximum advance booking horizon of 90 days (until ${maxHorizonDate}).`,
+        code: 'DATE_EXCEEDS_HORIZON',
+      });
+    }
+
+    // 5. Populate hospital_id from validated affiliation or primary doctor affiliation
+    let resolvedHospitalId = null;
+    if (hospital_id) {
+      const parsedHospitalId = parseInt(hospital_id, 10);
+      if (!isNaN(parsedHospitalId)) {
+        const affiliation = db.get(
+          `SELECT hospital_id FROM doctor_hospital_affiliations WHERE doctor_id = ? AND hospital_id = ?`,
+          [doctor.id, parsedHospitalId]
+        );
+        if (affiliation) {
+          resolvedHospitalId = affiliation.hospital_id;
+        }
+      }
+    }
+
+    if (!resolvedHospitalId) {
+      const primaryAffiliation = db.get(
+        `SELECT hospital_id FROM doctor_hospital_affiliations WHERE doctor_id = ? ORDER BY is_primary DESC, id ASC LIMIT 1`,
+        [doctor.id]
+      );
+      if (primaryAffiliation) {
+        resolvedHospitalId = primaryAffiliation.hospital_id;
+      }
+    }
+
+    // 6. Collision Prevention: Reject if another patient already has this slot accepted/confirmed
+    const existingAccepted = db.get(
+      `SELECT id FROM appointment_requests
+       WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
+       AND status IN ('accepted', 'confirmed')`,
+      [doctor.id, targetDate, normalizedSlot]
+    );
+
+    if (existingAccepted) {
+      return res.status(409).json({
+        success: false,
+        error: `The slot '${normalizedSlot}' on ${targetDate} has already been reserved and confirmed for another patient. Please choose a different time slot or date.`,
+        code: 'SLOT_ALREADY_BOOKED',
+      });
+    }
+
+    // 7. Prevent duplicate rapid submissions (within 30 seconds for same slot, date, and doctor by same patient)
     const recentDuplicate = db.get(
       `SELECT id FROM appointment_requests 
-       WHERE patient_id = ? AND doctor_id = ? AND preferred_slot = ? AND status = 'pending'
+       WHERE patient_id = ? AND doctor_id = ? AND requested_date = ? AND preferred_slot = ? AND status = 'pending'
        AND datetime(created_at, '+30 seconds') > datetime('now')`,
-      [patientProfile.id, doctor.id, preferred_slot.trim()]
+      [patientProfile.id, doctor.id, targetDate, normalizedSlot]
     );
 
     if (recentDuplicate) {
@@ -177,56 +347,86 @@ router.post(
       });
     }
 
-    // 5. Atomic Transaction: Insert request and status history with initial status 'pending'
-    const newAppointmentId = db.transaction((tx) => {
-      const result = tx.run(
-        `INSERT INTO appointment_requests (
-          patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status, is_demo_request
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 1)`,
-        [
-          patientProfile.id,
-          doctor.id,
-          hospital_id ? parseInt(hospital_id, 10) : null,
-          targetDate,
-          preferred_slot.trim(),
-          visit_type || 'In-person',
-          reason_for_visit ? reason_for_visit.trim() : 'General Consultation',
-        ]
-      );
+    // 8. Atomic Transaction: Insert request and status history with initial status 'pending'
+    let newAppointmentId;
+    try {
+      newAppointmentId = db.transaction((tx) => {
+        // Double check conflict inside transaction to avoid race conditions
+        const inTxConflict = tx.get(
+          `SELECT id FROM appointment_requests
+           WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
+           AND status IN ('accepted', 'confirmed')`,
+          [doctor.id, targetDate, normalizedSlot]
+        );
+        if (inTxConflict) {
+          const conflictErr = new Error(`Slot '${normalizedSlot}' on ${targetDate} is already confirmed.`);
+          conflictErr.code = 'SLOT_ALREADY_BOOKED';
+          throw conflictErr;
+        }
 
-      const apptId = result.lastInsertRowid;
+        const result = tx.run(
+          `INSERT INTO appointment_requests (
+            patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status, is_demo_request
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 1)`,
+          [
+            patientProfile.id,
+            doctor.id,
+            resolvedHospitalId,
+            targetDate,
+            normalizedSlot,
+            visit_type || 'In-person',
+            reason_for_visit ? reason_for_visit.trim() : 'General Consultation',
+          ]
+        );
 
-      tx.run(
-        `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
-         VALUES (?, 'pending', 'Appointment requested by patient', ?)`,
-        [apptId, req.user.id]
-      );
+        const apptId = result.lastInsertRowid;
 
-      tx.run(
-        `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
-         VALUES (?, 'APPOINTMENT_REQUEST_CREATED', 'APPOINTMENT', ?, ?, ?)`,
-        [
-          req.user.id,
-          apptId,
-          JSON.stringify({ doctorId: doctor.id, slot: preferred_slot, requestedDate: targetDate }),
-          req.ip || '127.0.0.1',
-        ]
-      );
+        tx.run(
+          `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
+           VALUES (?, 'pending', 'Appointment requested by patient', ?)`,
+          [apptId, req.user.id]
+        );
 
-      return apptId;
-    });
+        tx.run(
+          `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
+           VALUES (?, 'APPOINTMENT_REQUEST_CREATED', 'APPOINTMENT', ?, ?, ?)`,
+          [
+            req.user.id,
+            apptId,
+            JSON.stringify({ doctorId: doctor.id, slot: normalizedSlot, requestedDate: targetDate }),
+            req.ip || '127.0.0.1',
+          ]
+        );
+
+        return apptId;
+      });
+    } catch (err) {
+      if (
+        err.code === 'SLOT_ALREADY_BOOKED' ||
+        (err.message && err.message.includes('UNIQUE constraint')) ||
+        (err.code && String(err.code).includes('CONSTRAINT'))
+      ) {
+        return res.status(409).json({
+          success: false,
+          error: `The slot '${normalizedSlot}' on ${targetDate} has already been reserved and confirmed for another patient. Please choose a different time slot or date.`,
+          code: 'SLOT_ALREADY_BOOKED',
+        });
+      }
+      throw err;
+    }
 
     res.status(201).json({
       success: true,
-      message: `Appointment request submitted for ${doctor.full_name} at ${preferred_slot}. Status is Pending Doctor Review.`,
+      message: `Appointment request submitted for ${doctor.full_name} at ${normalizedSlot}. Status is Pending Doctor Review.`,
       data: {
         id: newAppointmentId,
         appointmentId: newAppointmentId,
         doctor_id: doctor.id,
         doctorId: doctor.id,
         doctorName: doctor.full_name,
-        preferred_slot: preferred_slot.trim(),
-        preferredSlot: preferred_slot.trim(),
+        hospital_id: resolvedHospitalId,
+        preferred_slot: normalizedSlot,
+        preferredSlot: normalizedSlot,
         requested_date: targetDate,
         requestedDate: targetDate,
         status: 'pending',
@@ -234,5 +434,131 @@ router.post(
     });
   }
 );
+
+/**
+ * Handler for patient cancelling an appointment
+ * Validates patient ownership and cancellable state
+ */
+function handlePatientCancel(req, res) {
+  const appointmentId = parseInt(req.params.id, 10);
+  if (isNaN(appointmentId)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid appointment ID provided.',
+      code: 'INVALID_APPOINTMENT_ID',
+    });
+  }
+
+  const patientProfile = db.get(
+    `SELECT id FROM patient_profiles WHERE user_id = ?`,
+    [req.user.id]
+  );
+
+  if (!patientProfile) {
+    return res.status(404).json({
+      success: false,
+      error: 'Patient profile not found for authenticated user.',
+      code: 'PROFILE_NOT_FOUND',
+    });
+  }
+
+  const appointment = db.get(
+    `SELECT * FROM appointment_requests WHERE id = ?`,
+    [appointmentId]
+  );
+
+  if (!appointment) {
+    return res.status(404).json({
+      success: false,
+      error: 'Appointment request not found.',
+      code: 'APPOINTMENT_NOT_FOUND',
+    });
+  }
+
+  // Strict Ownership: Patient can only cancel their own appointment
+  if (appointment.patient_id !== patientProfile.id) {
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden: You are not authorized to cancel another patient\'s appointment.',
+      code: 'FORBIDDEN_APPOINTMENT_ACCESS',
+    });
+  }
+
+  // Status Check: Only pending, requested, accepted, or confirmed can be cancelled
+  const cancellableStatuses = ['pending', 'requested', 'accepted', 'confirmed'];
+  if (!cancellableStatuses.includes(appointment.status)) {
+    return res.status(400).json({
+      success: false,
+      error: `Cannot cancel appointment with status '${appointment.status}'. Only pending or confirmed appointments can be cancelled.`,
+      code: 'INVALID_STATUS_TRANSITION',
+    });
+  }
+
+  // Date Check: Cannot cancel past appointments
+  const todayStr = getTodayDateString();
+  if (appointment.requested_date && appointment.requested_date < todayStr) {
+    return res.status(400).json({
+      success: false,
+      error: `Cannot cancel an appointment whose scheduled date (${appointment.requested_date}) has already passed.`,
+      code: 'APPOINTMENT_DATE_PASSED',
+    });
+  }
+
+  // Time Check: Cannot cancel if appointment is today and scheduled slot time has already passed
+  if (appointment.requested_date === todayStr && appointment.preferred_slot) {
+    const slotDateTime = parseAppointmentSlotDateTime(appointment.requested_date, appointment.preferred_slot);
+    if (slotDateTime && slotDateTime <= new Date()) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot cancel an appointment whose scheduled time (${appointment.preferred_slot}) on ${todayStr} has already passed or is currently taking place.`,
+        code: 'APPOINTMENT_TIME_PASSED',
+      });
+    }
+  }
+
+  const cancelReason = req.body?.notes?.trim() || req.body?.reason?.trim() ||
+    (appointment.requested_date === todayStr
+      ? 'Same-day cancellation by patient'
+      : 'Appointment cancelled by patient');
+
+  db.transaction((tx) => {
+    tx.run(
+      `UPDATE appointment_requests SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`,
+      [appointmentId]
+    );
+
+    tx.run(
+      `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
+       VALUES (?, 'cancelled', ?, ?)`,
+      [appointmentId, cancelReason, req.user.id]
+    );
+
+    tx.run(
+      `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
+       VALUES (?, 'PATIENT_APPOINTMENT_CANCELLED', 'APPOINTMENT', ?, ?, ?)`,
+      [
+        req.user.id,
+        appointmentId,
+        JSON.stringify({ previousStatus: appointment.status, requestedDate: appointment.requested_date, reason: cancelReason }),
+        req.ip || '127.0.0.1',
+      ]
+    );
+  });
+
+  const updated = db.get(`SELECT * FROM appointment_requests WHERE id = ?`, [appointmentId]);
+
+  res.status(200).json({
+    success: true,
+    message: `Appointment #${appointmentId} was successfully cancelled.`,
+    data: updated,
+  });
+}
+
+/**
+ * PATCH /api/patient/appointments/:id/cancel
+ * POST /api/patient/appointments/:id/cancel (fallback)
+ */
+router.patch('/appointments/:id/cancel', handlePatientCancel);
+router.post('/appointments/:id/cancel', handlePatientCancel);
 
 export default router;

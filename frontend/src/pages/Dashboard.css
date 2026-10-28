@@ -202,6 +202,11 @@
   color: #03543f;
 }
 
+.status-badge.completed {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
 .status-badge.cancelled,
 .status-badge.declined,
 .status-badge.rejected {
@@ -212,6 +217,7 @@
 .dashboard-action-buttons {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
 }
@@ -232,6 +238,22 @@
   background: #166534;
 }
 
+.dashboard-complete-btn {
+  padding: 6px 14px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dashboard-complete-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
 .dashboard-decline-btn {
   padding: 6px 14px;
   background: #ffffff;
@@ -248,10 +270,50 @@
   background: #fef2f2;
 }
 
+.dashboard-cancel-btn {
+  padding: 6px 12px;
+  background: #ffffff;
+  color: #b91c1c;
+  border: 1px solid #f87171;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dashboard-cancel-btn:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
 .dashboard-accept-btn:disabled,
-.dashboard-decline-btn:disabled {
+.dashboard-complete-btn:disabled,
+.dashboard-decline-btn:disabled,
+.dashboard-cancel-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.dashboard-notes-box {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #334155;
+  border-left: 3px solid #94a3b8;
+}
+
+.dashboard-patient-contact {
+  font-size: 11px;
+  color: #0f766e;
+  background: #f0fdfa;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
 }
 
 /* Placeholder Note Box */

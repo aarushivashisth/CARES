@@ -1085,6 +1085,732 @@ test('Milestone 4.1: Repeat import preserves existing facility records and admin
   assert.equal(checkData.data.isVerified, false);
 });
 
+// ====================================================================
+// MILESTONE 5: APPOINTMENT WORKFLOW & DATA INTEGRITY TESTS
+// ====================================================================
+
+test('Milestone 5: Successful appointment booking with configured slot and future date', async () => {
+  // Login as default patient
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token } = await loginRes.json();
+
+  // Pick a date 10 days in the future
+  const d = new Date();
+  d.setDate(d.getDate() + 10);
+  const futureDate = d.toISOString().split('T')[0];
+
+  const bookRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1, // Dr. Maya Bennett
+      preferred_slot: '11:30 AM',
+      requested_date: futureDate,
+      visit_type: 'In-person',
+      reason_for_visit: 'Annual wellness checkup'
+    })
+  });
+  const bookData = await bookRes.json();
+
+  assert.equal(bookRes.status, 201);
+  assert.equal(bookData.success, true);
+  assert.equal(bookData.data.status, 'pending');
+  assert.equal(bookData.data.preferred_slot, '11:30 AM');
+  assert.equal(bookData.data.requested_date, futureDate);
+  assert.ok(bookData.data.id, 'New appointment ID must be returned');
+});
+
+test('Milestone 5: Rejects appointment booking for doctor not accepting new patients', async () => {
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token } = await loginRes.json();
+
+  // Explicitly set Dr. Sofia Rivera (id: 3) is_accepting_new_patients = 0 in test database
+  db.exec("UPDATE doctor_profiles SET is_accepting_new_patients = 0 WHERE id = 3;");
+
+  try {
+    const res = await fetch(`${baseUrl}/api/patient/appointments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        doctor_id: 3,
+        preferred_slot: '10:00 AM',
+        requested_date: '2026-11-15'
+      })
+    });
+    const data = await res.json();
+
+    assert.equal(res.status, 400);
+    assert.equal(data.success, false);
+    assert.equal(data.code, 'DOCTOR_NOT_ACCEPTING_REQUESTS');
+  } finally {
+    // Restore doctor 3 accepting status in test database
+    db.exec("UPDATE doctor_profiles SET is_accepting_new_patients = 1 WHERE id = 3;");
+  }
+});
+
+test('Milestone 5: Rejects appointment booking for non-existent doctor', async () => {
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token } = await loginRes.json();
+
+  const res = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 99999,
+      preferred_slot: '10:00 AM'
+    })
+  });
+  const data = await res.json();
+
+  assert.equal(res.status, 404);
+  assert.equal(data.code, 'DOCTOR_NOT_FOUND');
+});
+
+test('Milestone 5: Rejects past appointment dates and dates exceeding 90-day booking horizon', async () => {
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token } = await loginRes.json();
+
+  // Test past date
+  const pastRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '11:30 AM',
+      requested_date: '2020-01-01'
+    })
+  });
+  const pastData = await pastRes.json();
+  assert.equal(pastRes.status, 400);
+  assert.equal(pastData.code, 'PAST_APPOINTMENT_DATE');
+
+  // Test date > 90 days in the future
+  const farFuture = new Date();
+  farFuture.setDate(farFuture.getDate() + 95);
+  const farFutureStr = farFuture.toISOString().split('T')[0];
+
+  const futureRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '11:30 AM',
+      requested_date: farFutureStr
+    })
+  });
+  const futureData = await futureRes.json();
+  assert.equal(futureRes.status, 400);
+  assert.equal(futureData.code, 'DATE_EXCEEDS_HORIZON');
+});
+
+test('Milestone 5: Rejects unconfigured slots not belonging to doctor schedule', async () => {
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token } = await loginRes.json();
+
+  const res = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '3:33 AM Middle of Night',
+      requested_date: '2026-11-20'
+    })
+  });
+  const data = await res.json();
+
+  assert.equal(res.status, 400);
+  assert.equal(data.code, 'INVALID_SLOT_SELECTED');
+});
+
+test('Milestone 5: Rejects rapid duplicate appointment submissions within 30 seconds', async () => {
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token } = await loginRes.json();
+
+  const d = new Date();
+  d.setDate(d.getDate() + 15);
+  const testDate = d.toISOString().split('T')[0];
+
+  // First submission
+  const res1 = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '2:00 PM',
+      requested_date: testDate
+    })
+  });
+  assert.equal(res1.status, 201);
+
+  // Rapid identical submission
+  const res2 = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '2:00 PM',
+      requested_date: testDate
+    })
+  });
+  const data2 = await res2.json();
+
+  assert.equal(res2.status, 409);
+  assert.equal(data2.code, 'DUPLICATE_SUBMISSION_DETECTED');
+});
+
+test('Milestone 5: Accepted-slot collision prevention blocks booking of already-confirmed slot', async () => {
+  // 1. Login as patient 1 and doctor 2 (Dr. Daniel Park)
+  const p1Login = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token: p1Token } = await p1Login.json();
+
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.daniel@cares.org', password: 'Doctor@12345' })
+  });
+  const { token: docToken } = await docLogin.json();
+
+  const d = new Date();
+  d.setDate(d.getDate() + 25);
+  const targetDate = d.toISOString().split('T')[0];
+  const slot = '9:00 AM';
+
+  // 2. Patient 1 requests slot
+  const reqRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${p1Token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 2,
+      preferred_slot: slot,
+      requested_date: targetDate
+    })
+  });
+  const { data: reqData } = await reqRes.json();
+  const apptId = reqData.id;
+
+  // 3. Doctor 2 accepts this appointment
+  const acceptRes = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptId}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'accepted' })
+  });
+  assert.equal(acceptRes.status, 200);
+
+  // 4. Register a second patient and attempt to book the exact same slot
+  const p2Email = `patient_collision_${Date.now()}@example.com`;
+  const p2Reg = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: p2Email,
+      password: 'Password123!',
+      full_name: 'Patient Collision Test'
+    })
+  });
+  const { token: p2Token } = await p2Reg.json();
+
+  const conflictRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${p2Token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 2,
+      preferred_slot: slot,
+      requested_date: targetDate
+    })
+  });
+  const conflictData = await conflictRes.json();
+
+  assert.equal(conflictRes.status, 409);
+  assert.equal(conflictData.code, 'SLOT_ALREADY_BOOKED');
+});
+
+test('Milestone 5: Role isolation blocks non-patients from booking appointments', async () => {
+  // Login as doctor
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.daniel@cares.org', password: 'Doctor@12345' })
+  });
+  const { token: docToken } = await docLogin.json();
+
+  const res = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '11:30 AM',
+      requested_date: '2026-11-28'
+    })
+  });
+  const data = await res.json();
+
+  assert.equal(res.status, 403);
+  assert.equal(data.code, 'FORBIDDEN_ROLE');
+});
+
+test('Milestone 5: Patient-to-patient ownership isolation prevents unauthorized cancellation', async () => {
+  // 1. Patient 1 books appointment
+  const p1Login = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token: p1Token } = await p1Login.json();
+
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  const targetDate = d.toISOString().split('T')[0];
+
+  const bookRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${p1Token}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1,
+      preferred_slot: '4:15 PM',
+      requested_date: targetDate
+    })
+  });
+  const { data: bookData } = await bookRes.json();
+  const apptId = bookData.id;
+
+  // 2. Patient 2 attempts to cancel Patient 1's appointment
+  const p2Email = `patient_attacker_${Date.now()}@example.com`;
+  const p2Reg = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: p2Email,
+      password: 'Password123!',
+      full_name: 'Patient Attacker Test'
+    })
+  });
+  const { token: p2Token } = await p2Reg.json();
+
+  const cancelRes = await fetch(`${baseUrl}/api/patient/appointments/${apptId}/cancel`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${p2Token}`
+    }
+  });
+  const cancelData = await cancelRes.json();
+
+  assert.equal(cancelRes.status, 403);
+  assert.equal(cancelData.code, 'FORBIDDEN_APPOINTMENT_ACCESS');
+
+  // Verify Patient 2 dedicated listing does NOT contain Patient 1's appointment
+  const listRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    headers: { Authorization: `Bearer ${p2Token}` }
+  });
+  const listData = await listRes.json();
+  assert.equal(listRes.status, 200);
+  assert.ok(!listData.data.some(a => a.id === apptId), 'Cross-patient appointment leakage detected');
+});
+
+test('Milestone 5: Doctor-to-doctor ownership isolation prevents cross-provider status updates', async () => {
+  // 1. Patient books appointment with Dr. Maya Bennett (id: 1)
+  const pLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token: pToken } = await pLogin.json();
+
+  const d = new Date();
+  d.setDate(d.getDate() + 35);
+  const targetDate = d.toISOString().split('T')[0];
+
+  const bookRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${pToken}`
+    },
+    body: JSON.stringify({
+      doctor_id: 1, // Dr. Maya
+      preferred_slot: '11:30 AM',
+      requested_date: targetDate
+    })
+  });
+  const { data: bookData } = await bookRes.json();
+  const apptId = bookData.id;
+
+  // 2. Dr. Daniel Park (id: 2) attempts to accept Dr. Maya's appointment
+  const doc2Login = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.daniel@cares.org', password: 'Doctor@12345' })
+  });
+  const { token: doc2Token } = await doc2Login.json();
+
+  const crossUpdate = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptId}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${doc2Token}`
+    },
+    body: JSON.stringify({ status: 'accepted' })
+  });
+  const crossData = await crossUpdate.json();
+
+  assert.equal(crossUpdate.status, 403);
+  assert.equal(crossData.code, 'FORBIDDEN_APPOINTMENT_ACCESS');
+});
+
+test('Milestone 5: Doctor lifecycle state machine transitions (Accept, Decline, Complete, Cancel, Notes)', async () => {
+  // Login patient and Dr. Daniel
+  const pLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token: pToken } = await pLogin.json();
+
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.daniel@cares.org', password: 'Doctor@12345' })
+  });
+  const { token: docToken } = await docLogin.json();
+
+  // 1. Create appointment A
+  const d = new Date();
+  d.setDate(d.getDate() + 40);
+  const targetDate = d.toISOString().split('T')[0];
+
+  const bookRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${pToken}`
+    },
+    body: JSON.stringify({
+      doctor_id: 2,
+      preferred_slot: '10:45 AM',
+      requested_date: targetDate
+    })
+  });
+  const { data: apptA } = await bookRes.json();
+
+  // 2. Doctor accepts appointment A
+  const acceptRes = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptA.id}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({
+      status: 'accepted',
+      notes: 'Confirmed by cardiology department'
+    })
+  });
+  assert.equal(acceptRes.status, 200);
+
+  // 3. Doctor cannot mark appointment A completed if date is in the future
+  const prematureComplete = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptA.id}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'completed' })
+  });
+  assert.equal(prematureComplete.status, 400);
+  const prematureData = await prematureComplete.json();
+  assert.equal(prematureData.code, 'CANNOT_COMPLETE_FUTURE_APPOINTMENT');
+
+  // Test same-day premature completion: slot time in future on current date
+  const todayStr = new Date().toISOString().split('T')[0];
+  const sameDayFutureAppt = db.run(
+    `INSERT INTO appointment_requests (
+      patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status
+    ) VALUES (1, 2, 1, ?, '11:59 PM', 'In-person', 'Checkup', 'accepted')`,
+    [todayStr]
+  );
+  const sameDayPrematureRes = await fetch(`${baseUrl}/api/doctor/portal/appointments/${sameDayFutureAppt.lastInsertRowid}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'completed' })
+  });
+  assert.equal(sameDayPrematureRes.status, 400);
+  const sameDayPrematureData = await sameDayPrematureRes.json();
+  assert.equal(sameDayPrematureData.code, 'CANNOT_COMPLETE_FUTURE_APPOINTMENT');
+
+  // Test completing an appointment whose scheduled date/time has passed succeeds
+  const pastAppt = db.run(
+    `INSERT INTO appointment_requests (
+      patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status
+    ) VALUES (1, 2, 1, '2026-01-01', '09:00 AM', 'In-person', 'Followup', 'accepted')`
+  );
+  const completePastRes = await fetch(`${baseUrl}/api/doctor/portal/appointments/${pastAppt.lastInsertRowid}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'completed', notes: 'Completed patient consultation successfully' })
+  });
+  assert.equal(completePastRes.status, 200);
+  const completePastData = await completePastRes.json();
+  assert.equal(completePastData.data.status, 'completed');
+
+  // 4. Doctor cancels accepted appointment A with required reason
+  // Missing reason fails
+  const noReasonCancel = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptA.id}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'cancelled' })
+  });
+  assert.equal(noReasonCancel.status, 400);
+
+  // Valid reason succeeds
+  const validCancel = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptA.id}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({
+      status: 'cancelled',
+      notes: 'Emergency operating schedule change'
+    })
+  });
+  assert.equal(validCancel.status, 200);
+
+  // 5. Terminal status immutability: Cannot transition from cancelled
+  const reAccept = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptA.id}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'accepted' })
+  });
+  assert.equal(reAccept.status, 400);
+  const reAcceptData = await reAccept.json();
+  assert.equal(reAcceptData.code, 'TERMINAL_STATUS_IMMUTABLE');
+
+  // 6. Verify history endpoint returns audit trail
+  const histRes = await fetch(`${baseUrl}/api/doctor/portal/appointments/${apptA.id}/history`, {
+    headers: { Authorization: `Bearer ${docToken}` }
+  });
+  const histData = await histRes.json();
+  assert.equal(histRes.status, 200);
+  assert.ok(histData.data.length >= 3, 'Must contain pending, accepted, and cancelled entries');
+});
+
+test('Milestone 5: Doctor collision prevention blocks accepting multiple requests for the same slot', async () => {
+  const docLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'dr.daniel@cares.org', password: 'Doctor@12345' })
+  });
+  const { token: docToken } = await docLogin.json();
+
+  const d = new Date();
+  d.setDate(d.getDate() + 45);
+  const targetDate = d.toISOString().split('T')[0];
+  const slot = '10:45 AM';
+
+  // Insert two pending requests for the same doctor, date, and slot
+  const req1 = db.run(
+    `INSERT INTO appointment_requests (patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status)
+     VALUES (1, 2, 1, ?, ?, 'In-person', 'Consult 1', 'pending')`,
+    [targetDate, slot]
+  );
+  const req2 = db.run(
+    `INSERT INTO appointment_requests (patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status)
+     VALUES (1, 2, 1, ?, ?, 'In-person', 'Consult 2', 'pending')`,
+    [targetDate, slot]
+  );
+
+  // Accept request 1 -> succeeds
+  const accept1Res = await fetch(`${baseUrl}/api/doctor/portal/appointments/${req1.lastInsertRowid}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'accepted' })
+  });
+  assert.equal(accept1Res.status, 200);
+
+  // Accept request 2 for same slot -> blocked with 409 SLOT_ALREADY_CONFIRMED
+  const accept2Res = await fetch(`${baseUrl}/api/doctor/portal/appointments/${req2.lastInsertRowid}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${docToken}`
+    },
+    body: JSON.stringify({ status: 'accepted' })
+  });
+  assert.equal(accept2Res.status, 409);
+  const accept2Data = await accept2Res.json();
+  assert.equal(accept2Data.code, 'SLOT_ALREADY_CONFIRMED');
+});
+
+test('Milestone 5: Patient cancellation authorization, same-day rules, and past slot rejections', async () => {
+  const pLogin = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@cares.org', password: 'Patient@12345' })
+  });
+  const { token: pToken } = await pLogin.json();
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Configure Doctor 1 with '11:59 PM' slot to guarantee future same-day booking
+  const origSlots = db.get(`SELECT available_slots_json FROM doctor_profiles WHERE id = 1`).available_slots_json;
+  const updatedSlots = [...JSON.parse(origSlots), '11:59 PM'];
+  db.exec(`UPDATE doctor_profiles SET available_slots_json = '${JSON.stringify(updatedSlots)}' WHERE id = 1;`);
+
+  try {
+    // 1. Book future slot for today
+    const bookRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pToken}`
+      },
+      body: JSON.stringify({
+        doctor_id: 1,
+        preferred_slot: '11:59 PM',
+        requested_date: todayStr
+      })
+    });
+    const { data: bookData } = await bookRes.json();
+    assert.equal(bookRes.status, 201);
+
+    // 2. Same-day cancellation before appointment takes place succeeds
+    const cancelRes = await fetch(`${baseUrl}/api/patient/appointments/${bookData.id}/cancel`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pToken}`
+      }
+    });
+    const cancelData = await cancelRes.json();
+
+    assert.equal(cancelRes.status, 200);
+    assert.equal(cancelData.data.status, 'cancelled');
+
+    // 3. Rejection of cancellation when slot time has already passed on today's date
+    const pastTimeAppt = db.run(
+      `INSERT INTO appointment_requests (
+        patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status
+      ) VALUES (1, 1, 1, ?, '01:00 AM', 'In-person', 'Early Checkup', 'accepted')`,
+      [todayStr]
+    );
+
+    const pastCancelRes = await fetch(`${baseUrl}/api/patient/appointments/${pastTimeAppt.lastInsertRowid}/cancel`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pToken}`
+      }
+    });
+    assert.equal(pastCancelRes.status, 400);
+    const pastCancelData = await pastCancelRes.json();
+    assert.equal(pastCancelData.code, 'APPOINTMENT_TIME_PASSED');
+
+    // 4. Rejection of booking past slot on today's date
+    const slotsWithPast = ['01:00 AM', ...updatedSlots];
+    db.exec(`UPDATE doctor_profiles SET available_slots_json = '${JSON.stringify(slotsWithPast)}' WHERE id = 1;`);
+
+    const pastBookRes = await fetch(`${baseUrl}/api/patient/appointments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pToken}`
+      },
+      body: JSON.stringify({
+        doctor_id: 1,
+        preferred_slot: '01:00 AM',
+        requested_date: todayStr
+      })
+    });
+    assert.equal(pastBookRes.status, 400);
+    const pastBookData = await pastBookRes.json();
+    assert.equal(pastBookData.code, 'PAST_APPOINTMENT_SLOT');
+  } finally {
+    // Restore original slots
+    db.exec(`UPDATE doctor_profiles SET available_slots_json = '${origSlots}' WHERE id = 1;`);
+  }
+});
+
 
 
 

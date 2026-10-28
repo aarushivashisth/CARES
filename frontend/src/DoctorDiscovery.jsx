@@ -487,14 +487,20 @@ export default function DoctorDiscovery() {
                   </div>
 
                   <div className="doctor-profile">
-                    <span className="doctor-status">
+                    <span
+                      className="doctor-status"
+                      style={{
+                        color: doctor.accepting ? "#168044" : "#991b1b",
+                        fontWeight: 600,
+                      }}
+                    >
                       ●{" "}
                       {doctor.accepting
                         ? "Accepting new patients"
                         : "Not accepting new patients"}
                     </span>
 
-                    <p>Next available · Sample times</p>
+                    <p>{doctor.accepting ? "Next available · Configured slots" : "Consultation booking closed"}</p>
 
                     <Link className="doctor-view-profile" to={`/doctors/${doctor.id}`}>
                       View profile ↗
@@ -503,28 +509,40 @@ export default function DoctorDiscovery() {
                 </div>
 
                 <div className="doctor-card-slots">
-                  <span>✓ Sample appointment slots</span>
+                  <span>{doctor.accepting ? "✓ Available appointment slots" : "⛔ New requests closed"}</span>
 
                   <div>
-                    {(doctor.slots || []).map((slot) => (
-                      <Link
-                        key={slot}
-                        to={`/doctors/${doctor.id}?slot=${encodeURIComponent(slot)}`}
-                        style={{
-                          textDecoration: "none",
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          background: "#ffffff",
-                          border: "1px solid #dce2da",
-                          color: "#168044",
-                          fontWeight: 600,
-                          fontSize: "12px",
-                          display: "inline-block",
-                        }}
-                      >
-                        {slot}
-                      </Link>
-                    ))}
+                    {doctor.accepting ? (
+                      (doctor.slots && doctor.slots.length > 0) ? (
+                        doctor.slots.map((slot) => (
+                          <Link
+                            key={slot}
+                            to={`/doctors/${doctor.id}?slot=${encodeURIComponent(slot)}`}
+                            style={{
+                              textDecoration: "none",
+                              padding: "6px 12px",
+                              borderRadius: "6px",
+                              background: "#ffffff",
+                              border: "1px solid #dce2da",
+                              color: "#168044",
+                              fontWeight: 600,
+                              fontSize: "12px",
+                              display: "inline-block",
+                            }}
+                          >
+                            {slot}
+                          </Link>
+                        ))
+                      ) : (
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>
+                          No public slots listed · View profile
+                        </span>
+                      )
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "#991b1b", fontWeight: 500 }}>
+                        Dr. {doctor.name} is currently not accepting new patient appointment requests.
+                      </span>
+                    )}
                   </div>
                 </div>
               </article>
