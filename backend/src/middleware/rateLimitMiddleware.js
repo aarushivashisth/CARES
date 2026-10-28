@@ -1,6 +1,6 @@
 /**
  * In-memory Rate Limiting Middleware for Authentication Endpoints.
- * 
+ *
  * DESIGN NOTES:
  * - Applied narrowly to sensitive authentication endpoints (e.g. login, registration)
  *   to mitigate automated brute-force credential stuffing and denial-of-service attempts.
