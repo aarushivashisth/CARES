@@ -1,4 +1,3 @@
-
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from './context/useAuth.js'
 
@@ -47,7 +46,12 @@ export default function Navbar() {
           Hospitals
         </Link>
         <Link to="/#home-care">Care at home</Link>
-        <Link to="/#emergency">Emergency</Link>
+        <Link
+          className={pathname === '/emergency' ? 'active' : ''}
+          to="/emergency"
+        >
+          Emergency
+        </Link>
       </nav>
 
       <div className="nav-actions">
@@ -85,4 +89,3 @@ export default function Navbar() {
     </header>
   )
 }
-

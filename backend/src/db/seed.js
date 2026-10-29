@@ -1,9 +1,24 @@
+import path from 'node:path';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'node:url';
 import { db } from './connection.js';
 import { initDatabase } from './initDb.js';
+import { config, isLiveDatabase, resolveDatabasePath } from '../config/env.js';
 
-export async function seedDatabase() {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Re-export shared path safety helpers
+export { isLiveDatabase, resolveDatabasePath };
+
+export async function seedDatabase(targetPath = config.databasePath) {
+  const activePath = targetPath || config.databasePath;
+  if (isLiveDatabase(activePath)) {
+    throw new Error(
+      `CRITICAL SAFETY GUARD: Database seeding is refused because the target database (${activePath}) resolves to the protected live database (cares.db). Seeding wipes all existing data. To seed demonstration or test data, explicitly configure DATABASE_PATH to point to a dedicated database (e.g., ./data/cares.demo.db).`
+    );
+  }
+
   console.log('🌱 Starting database seeding with synthetic demonstration data...');
 
   // Ensure tables exist

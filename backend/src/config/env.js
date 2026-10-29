@@ -8,6 +8,50 @@ const __dirname = path.dirname(__filename);
 // Load .env from backend root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+const backendRoot = path.resolve(__dirname, '../../');
+
+/**
+ * Resolves a database path string to a canonical absolute path.
+ * Relative paths are always anchored to the backend root directory (e.g. ./data/cares.db),
+ * ensuring consistent resolution regardless of the shell's current working directory.
+ */
+export function resolveDatabasePath(dbPath) {
+  if (!dbPath || typeof dbPath !== 'string') return '';
+  const trimmed = dbPath.trim();
+  if (!trimmed) return '';
+  return path.isAbsolute(trimmed)
+    ? path.resolve(trimmed)
+    : path.resolve(backendRoot, trimmed);
+}
+
+/**
+ * Robustly checks if a database path resolves to the protected live database (cares.db).
+ * Accurately normalizes relative paths, absolute paths, Windows separators, and casing.
+ * Includes defense-in-depth checks against both backend root and process.cwd().
+ */
+export function isLiveDatabase(dbPath) {
+  if (!dbPath || typeof dbPath !== 'string') return false;
+  const trimmed = dbPath.trim();
+  if (!trimmed) return false;
+
+  const liveDbPath = path.resolve(backendRoot, 'data/cares.db');
+  const normalizedLive = path.normalize(liveDbPath).toLowerCase();
+
+  // Primary check: resolved relative to backend root
+  const resolvedTarget = resolveDatabasePath(trimmed);
+  if (path.normalize(resolvedTarget).toLowerCase() === normalizedLive) {
+    return true;
+  }
+
+  // Defense-in-depth: check if path resolved relative to current working directory matches live database
+  const cwdTarget = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(process.cwd(), trimmed);
+  if (path.normalize(cwdTarget).toLowerCase() === normalizedLive) {
+    return true;
+  }
+
+  return false;
+}
+
 export const DEVELOPMENT_JWT_SECRET = 'cares_capstone_jwt_development_secret_key_change_in_production_2026';
 
 /**

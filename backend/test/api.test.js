@@ -1,6 +1,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Set test environment and isolated test database BEFORE loading app or database connection
 process.env.NODE_ENV = 'test';
@@ -10,11 +15,18 @@ const { default: app } = await import('../src/app.js');
 const { seedDatabase } = await import('../src/db/seed.js');
 const { db } = await import('../src/db/connection.js');
 const { importLocalProviders, validateFacilityRecord, validateDoctorRecord } = await import('../src/scripts/importLocalProviders.js');
-const { validateJwtSecret, validateConfig, buildConfig, DEVELOPMENT_JWT_SECRET } = await import('../src/config/env.js');
+const { validateJwtSecret, validateConfig, buildConfig, DEVELOPMENT_JWT_SECRET, isLiveDatabase, resolveDatabasePath } = await import('../src/config/env.js');
 const { createAuthRateLimiter } = await import('../src/middleware/rateLimitMiddleware.js');
 
 let server;
 let baseUrl;
+
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 before(async () => {
   const { config } = await import('../src/config/env.js');
@@ -1589,7 +1601,7 @@ test('Milestone 5: Doctor lifecycle state machine transitions (Accept, Decline, 
   assert.equal(prematureData.code, 'CANNOT_COMPLETE_FUTURE_APPOINTMENT');
 
   // Test same-day premature completion: slot time in future on current date
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
   const sameDayFutureAppt = db.run(
     `INSERT INTO appointment_requests (
       patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status
@@ -1732,7 +1744,7 @@ test('Milestone 5: Patient cancellation authorization, same-day rules, and past 
   });
   const { token: pToken } = await pLogin.json();
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
 
   // Configure Doctor 1 with '11:59 PM' slot to guarantee future same-day booking
   const origSlots = db.get(`SELECT available_slots_json FROM doctor_profiles WHERE id = 1`).available_slots_json;
@@ -2327,4 +2339,105 @@ test('Milestone 7: Authentication rate limiting rejects excessive requests with 
   testLimiter.reset();
   testLimiter(fakeReq, fakeRes, mockNext);
   assert.equal(nextCalled, 4); // Passes again after reset
+});
+
+test('Safety Guard: resolveDatabasePath anchors relative paths to backend root consistently', () => {
+  const backendRoot = path.resolve(__dirname, '..');
+
+  // Standard relative paths
+  assert.equal(resolveDatabasePath('./data/cares.db'), path.resolve(backendRoot, 'data/cares.db'));
+  assert.equal(resolveDatabasePath('data/cares.demo.db'), path.resolve(backendRoot, 'data/cares.demo.db'));
+  assert.equal(resolveDatabasePath('data\\cares.demo.db'), path.resolve(backendRoot, 'data/cares.demo.db'));
+
+  // Traversal paths
+  assert.equal(resolveDatabasePath('./data/../data/cares.db'), path.resolve(backendRoot, 'data/cares.db'));
+
+  // Absolute path preserved
+  const absPath = path.resolve('C:/some/custom/isolated.db');
+  assert.equal(resolveDatabasePath(absPath), absPath);
+
+  // Whitespace trimming
+  assert.equal(resolveDatabasePath('  ./data/cares.db  '), path.resolve(backendRoot, 'data/cares.db'));
+
+  // Non-string or empty input safely returns empty string
+  assert.equal(resolveDatabasePath(''), '');
+  assert.equal(resolveDatabasePath(null), '');
+  assert.equal(resolveDatabasePath(undefined), '');
+});
+
+test('Safety Guard: isLiveDatabase correctly identifies live database variants and rejects non-live paths', () => {
+  const backendRoot = path.resolve(__dirname, '..');
+  const liveAbs = path.resolve(backendRoot, 'data/cares.db');
+
+  // Must identify live database variants
+  assert.equal(isLiveDatabase('./data/cares.db'), true);
+  assert.equal(isLiveDatabase('data\\cares.db'), true);
+  assert.equal(isLiveDatabase('DATA/CARES.DB'), true);
+  assert.equal(isLiveDatabase('./data/../data/cares.db'), true);
+  assert.equal(isLiveDatabase(liveAbs), true);
+  assert.equal(isLiveDatabase(liveAbs.toUpperCase()), true);
+  assert.equal(isLiveDatabase('   ./data/cares.db   '), true);
+
+  // Must reject test and demo databases
+  assert.equal(isLiveDatabase('./data/cares.demo.db'), false);
+  assert.equal(isLiveDatabase('./data/cares.test.db'), false);
+  assert.equal(isLiveDatabase('data\\cares.test-isolated.db'), false);
+  assert.equal(isLiveDatabase(''), false);
+  assert.equal(isLiveDatabase(null), false);
+  assert.equal(isLiveDatabase(undefined), false);
+});
+
+test('Safety Guard: seedDatabase strictly refuses execution against live database without modifying data', async () => {
+  await assert.rejects(
+    async () => {
+      await seedDatabase('./data/cares.db');
+    },
+    {
+      name: 'Error',
+      message: /CRITICAL SAFETY GUARD: Database seeding is refused because the target database/
+    }
+  );
+
+  await assert.rejects(
+    async () => {
+      await seedDatabase('data\\cares.db');
+    },
+    /CRITICAL SAFETY GUARD/
+  );
+
+  await assert.rejects(
+    async () => {
+      await seedDatabase('DATA/CARES.DB');
+    },
+    /CRITICAL SAFETY GUARD/
+  );
+});
+
+test('Safety Guard: correctMilestone4Data script safely exits when --confirm-correction is omitted', () => {
+  const scriptPath = path.resolve(__dirname, '../src/scripts/correctMilestone4Data.js');
+  const res = spawnSync(process.execPath, [scriptPath], {
+    env: {
+      ...process.env,
+      TARGET_DATABASE_PATH: './data/cares.test-dummy-unconfirmed.db'
+    },
+    encoding: 'utf-8'
+  });
+
+  assert.equal(res.status, 0);
+  assert.match(res.stderr, /SAFETY GUARD: Milestone 4\.1 data correction script requires explicit confirmation/);
+  assert.match(res.stderr, /To run this correction against the configured database, re-run with: --confirm-correction/);
+});
+
+test('Safety Guard: correctMilestone4Data script refuses live database if --allow-live-correction is omitted', () => {
+  const scriptPath = path.resolve(__dirname, '../src/scripts/correctMilestone4Data.js');
+  const res = spawnSync(process.execPath, [scriptPath, '--confirm-correction'], {
+    env: {
+      ...process.env,
+      TARGET_DATABASE_PATH: './data/cares.db'
+    },
+    encoding: 'utf-8'
+  });
+
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /CRITICAL SAFETY GUARD: Target database resolves to the protected live database/);
 });

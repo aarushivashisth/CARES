@@ -294,6 +294,398 @@ describe('Milestone 5: Automated Frontend Appointment Workflow Component Tests',
         }));
       });
     });
+
+    it('opens decline dialog, supports entering reason, and submits decline status', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: { id: 2, email: 'dr.daniel@cares.org', role: 'doctor' },
+        isAuthenticated: true,
+        logout: vi.fn(),
+      });
+
+      const mockDoctorDash = {
+        profile: { name: 'Dr. Daniel Park', specialty: 'Cardiology', isVerified: true },
+        metrics: { totalRequests: 1, pendingReview: 1, confirmed: 0, completed: 0 },
+        appointments: [
+          {
+            id: 202,
+            patient_name: 'Robert Smith',
+            patient_phone: '555-0199',
+            requested_date: '2026-11-15',
+            preferred_slot: '10:45 AM',
+            visit_type: 'In-person',
+            status: 'pending',
+          },
+        ],
+      };
+
+      vi.spyOn(api, 'get').mockImplementation((endpoint) => {
+        if (endpoint.includes('/dashboard')) {
+          return Promise.resolve({ success: true, data: mockDoctorDash });
+        }
+        return Promise.resolve({ success: true, data: { doctor: { verificationStatus: 'verified' } } });
+      });
+
+      const patchSpy = vi.spyOn(api, 'patch').mockResolvedValue({
+        success: true,
+        data: { id: 202, status: 'declined' },
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/doctor/dashboard']}>
+          <DoctorDashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Robert Smith')).toBeTruthy();
+      });
+
+      // Click Decline button
+      const declineBtn = screen.getByText(/✕ Decline/i);
+      fireEvent.click(declineBtn);
+
+      // Verify accessible dialog appears
+      await waitFor(() => {
+        const dialog = screen.getByRole('dialog');
+        expect(dialog).toBeTruthy();
+        expect(screen.getByText(/Decline Appointment Request/i)).toBeTruthy();
+      });
+
+      // Enter specific decline reason
+      const notesInput = screen.getByLabelText(/Reason for declining/i);
+      fireEvent.change(notesInput, { target: { value: 'Physician unavailable due to scheduled surgery.' } });
+
+      // Submit
+      const confirmDeclineBtn = screen.getByRole('button', { name: /Decline Request/i });
+      fireEvent.click(confirmDeclineBtn);
+
+      await waitFor(() => {
+        expect(patchSpy).toHaveBeenCalledWith('/doctor/portal/appointments/202/status', {
+          status: 'declined',
+          notes: 'Physician unavailable due to scheduled surgery.',
+        });
+      });
+
+      // Dialog closes on success
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+    });
+
+    it('cancels decline dialog via Cancel button and Escape key without submitting', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: { id: 2, email: 'dr.daniel@cares.org', role: 'doctor' },
+        isAuthenticated: true,
+        logout: vi.fn(),
+      });
+
+      const mockDoctorDash = {
+        profile: { name: 'Dr. Daniel Park', specialty: 'Cardiology', isVerified: true },
+        metrics: { totalRequests: 1, pendingReview: 1, confirmed: 0, completed: 0 },
+        appointments: [
+          {
+            id: 202,
+            patient_name: 'Robert Smith',
+            requested_date: '2026-11-15',
+            preferred_slot: '10:45 AM',
+            status: 'pending',
+          },
+        ],
+      };
+
+      vi.spyOn(api, 'get').mockResolvedValue({ success: true, data: mockDoctorDash });
+      const patchSpy = vi.spyOn(api, 'patch').mockResolvedValue({ success: true });
+
+      render(
+        <MemoryRouter initialEntries={['/doctor/dashboard']}>
+          <DoctorDashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Robert Smith')).toBeTruthy();
+      });
+
+      // Open and cancel via Cancel button
+      fireEvent.click(screen.getByText(/✕ Decline/i));
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(patchSpy).not.toHaveBeenCalled();
+
+      // Open and cancel via Escape key
+      fireEvent.click(screen.getByText(/✕ Decline/i));
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(patchSpy).not.toHaveBeenCalled();
+    });
+
+    it('opens cancel dialog, enforces 5-character reason validation, and submits cancellation', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: { id: 2, email: 'dr.daniel@cares.org', role: 'doctor' },
+        isAuthenticated: true,
+        logout: vi.fn(),
+      });
+
+      const mockDoctorDash = {
+        profile: { name: 'Dr. Daniel Park', specialty: 'Cardiology', isVerified: true },
+        metrics: { totalRequests: 1, pendingReview: 0, confirmed: 1, completed: 0 },
+        appointments: [
+          {
+            id: 203,
+            patient_name: 'Alice Cooper',
+            patient_phone: '555-0244',
+            requested_date: '2026-11-20',
+            preferred_slot: '02:00 PM',
+            visit_type: 'In-person',
+            status: 'accepted',
+          },
+        ],
+      };
+
+      vi.spyOn(api, 'get').mockResolvedValue({ success: true, data: mockDoctorDash });
+      const patchSpy = vi.spyOn(api, 'patch').mockResolvedValue({
+        success: true,
+        data: { id: 203, status: 'cancelled' },
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/doctor/dashboard']}>
+          <DoctorDashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Alice Cooper')).toBeTruthy();
+      });
+
+      // Click Cancel Visit
+      const cancelBtn = screen.getByText(/Cancel Visit/i);
+      fireEvent.click(cancelBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeTruthy();
+        expect(screen.getByText(/Cancel Confirmed Appointment/i)).toBeTruthy();
+      });
+
+      const submitCancelBtn = screen.getByRole('button', { name: /Confirm Cancellation/i });
+
+      // Attempt submit without reason -> validation error
+      fireEvent.click(submitCancelBtn);
+      await waitFor(() => {
+        expect(screen.getByText(/A cancellation reason of at least 5 characters is required/i)).toBeTruthy();
+      });
+      expect(patchSpy).not.toHaveBeenCalled();
+
+      // Attempt submit with short reason (<5 chars)
+      const reasonInput = screen.getByLabelText(/Cancellation Reason/i);
+      fireEvent.change(reasonInput, { target: { value: 'Sick' } });
+      fireEvent.click(submitCancelBtn);
+      await waitFor(() => {
+        expect(screen.getByText(/A cancellation reason of at least 5 characters is required/i)).toBeTruthy();
+      });
+      expect(patchSpy).not.toHaveBeenCalled();
+
+      // Enter valid reason and submit
+      fireEvent.change(reasonInput, { target: { value: 'Emergency cardiology operating schedule' } });
+      fireEvent.click(submitCancelBtn);
+
+      await waitFor(() => {
+        expect(patchSpy).toHaveBeenCalledWith('/doctor/portal/appointments/203/status', {
+          status: 'cancelled',
+          notes: 'Emergency cardiology operating schedule',
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+    });
+
+    it('opens complete consultation dialog, collects consultation notes, and submits completion', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: { id: 2, email: 'dr.daniel@cares.org', role: 'doctor' },
+        isAuthenticated: true,
+        logout: vi.fn(),
+      });
+
+      // Past date appointment so completion button is enabled
+      const mockDoctorDash = {
+        profile: { name: 'Dr. Daniel Park', specialty: 'Cardiology', isVerified: true },
+        metrics: { totalRequests: 1, pendingReview: 0, confirmed: 1, completed: 0 },
+        appointments: [
+          {
+            id: 204,
+            patient_name: 'David Miller',
+            requested_date: '2026-01-10',
+            preferred_slot: '09:00 AM',
+            visit_type: 'In-person',
+            status: 'accepted',
+          },
+        ],
+      };
+
+      vi.spyOn(api, 'get').mockResolvedValue({ success: true, data: mockDoctorDash });
+      const patchSpy = vi.spyOn(api, 'patch').mockResolvedValue({
+        success: true,
+        data: { id: 204, status: 'completed' },
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/doctor/dashboard']}>
+          <DoctorDashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('David Miller')).toBeTruthy();
+      });
+
+      // Click Complete button
+      const completeBtn = screen.getByText(/✓ Complete/i);
+      fireEvent.click(completeBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeTruthy();
+        expect(screen.getByRole('heading', { name: /Complete Consultation/i })).toBeTruthy();
+      });
+
+      // Verify default notes and customize
+      const notesInput = screen.getByLabelText(/Consultation Notes/i);
+      expect(notesInput.value).toBe('Consultation successfully completed');
+
+      fireEvent.change(notesInput, {
+        target: { value: 'Patient vitals stable. Prescribed statin therapy and scheduled follow-up in 30 days.' },
+      });
+
+      const confirmCompleteBtn = screen.getByRole('button', { name: /Complete Consultation/i });
+      fireEvent.click(confirmCompleteBtn);
+
+      await waitFor(() => {
+        expect(patchSpy).toHaveBeenCalledWith('/doctor/portal/appointments/204/status', {
+          status: 'completed',
+          notes: 'Patient vitals stable. Prescribed statin therapy and scheduled follow-up in 30 days.',
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+    });
+
+    it('retains entered notes and shows error notice when API status update fails', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: { id: 2, email: 'dr.daniel@cares.org', role: 'doctor' },
+        isAuthenticated: true,
+        logout: vi.fn(),
+      });
+
+      const mockDoctorDash = {
+        profile: { name: 'Dr. Daniel Park', specialty: 'Cardiology', isVerified: true },
+        metrics: { totalRequests: 1, pendingReview: 0, confirmed: 1, completed: 0 },
+        appointments: [
+          {
+            id: 204,
+            patient_name: 'David Miller',
+            requested_date: '2026-01-10',
+            preferred_slot: '09:00 AM',
+            status: 'accepted',
+          },
+        ],
+      };
+
+      vi.spyOn(api, 'get').mockResolvedValue({ success: true, data: mockDoctorDash });
+      vi.spyOn(api, 'patch').mockRejectedValue(new Error('Network connectivity timeout'));
+
+      render(
+        <MemoryRouter initialEntries={['/doctor/dashboard']}>
+          <DoctorDashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('David Miller')).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText(/✓ Complete/i));
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+
+      const notesInput = screen.getByLabelText(/Consultation Notes/i);
+      fireEvent.change(notesInput, { target: { value: 'Special clinical observations that must not be lost.' } });
+
+      fireEvent.click(screen.getByRole('button', { name: /Complete Consultation/i }));
+
+      // Wait for error notice
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeTruthy();
+        expect(screen.getByText(/Network connectivity timeout/i)).toBeTruthy();
+      });
+
+      // Dialog is preserved and input value is intact
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      expect(screen.getByLabelText(/Consultation Notes/i).value).toBe('Special clinical observations that must not be lost.');
+    });
+
+    it('prevents accidental duplicate submission while request is in flight', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: { id: 2, email: 'dr.daniel@cares.org', role: 'doctor' },
+        isAuthenticated: true,
+        logout: vi.fn(),
+      });
+
+      const mockDoctorDash = {
+        profile: { name: 'Dr. Daniel Park', specialty: 'Cardiology', isVerified: true },
+        metrics: { totalRequests: 1, pendingReview: 1, confirmed: 0, completed: 0 },
+        appointments: [
+          {
+            id: 202,
+            patient_name: 'Robert Smith',
+            requested_date: '2026-11-15',
+            preferred_slot: '10:45 AM',
+            status: 'pending',
+          },
+        ],
+      };
+
+      vi.spyOn(api, 'get').mockResolvedValue({ success: true, data: mockDoctorDash });
+      // In-flight promise that never resolves immediately
+      let resolver;
+      const pendingPromise = new Promise((resolve) => { resolver = resolve; });
+      const patchSpy = vi.spyOn(api, 'patch').mockReturnValue(pendingPromise);
+
+      render(
+        <MemoryRouter initialEntries={['/doctor/dashboard']}>
+          <DoctorDashboard />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Robert Smith')).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText(/✕ Decline/i));
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+
+      const submitBtn = screen.getByRole('button', { name: /Decline Request/i });
+      fireEvent.click(submitBtn);
+
+      // Verify button is disabled and shows processing state
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Processing\.\.\./i })).toBeTruthy();
+        expect(screen.getByRole('button', { name: /Processing\.\.\./i }).hasAttribute('disabled')).toBe(true);
+      });
+
+      // Attempting second click should not dispatch another request
+      fireEvent.click(screen.getByRole('button', { name: /Processing\.\.\./i }));
+      expect(patchSpy).toHaveBeenCalledTimes(1);
+
+      // Clean up in-flight promise and wait for resolution
+      resolver({ success: true });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+    });
   });
 
   describe('Milestone 6: Practice Settings & Availability Scheduling (DoctorDashboard)', () => {

@@ -2,14 +2,38 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { config, isLiveDatabase, resolveDatabasePath } from '../config/env.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = path.resolve(__dirname, '../../data/cares.db');
-const backupPath = path.resolve(__dirname, `../../data/cares.db.backup.${new Date().toISOString().replace(/[:.]/g, '-')}`);
+// Respect configured database path; resolve relative paths consistently relative to backend root
+const targetRaw = process.env.TARGET_DATABASE_PATH || config.databasePath;
+const dbPath = resolveDatabasePath(targetRaw);
 
 console.log('=== Milestone 4.1 Hospital Data Integrity Correction ===');
+
+// Safety Guard 1: Require explicit confirmation argument before running any data-changing operations
+const isConfirmed = process.argv.includes('--confirm-correction');
+if (!isConfirmed) {
+  console.warn('⚠️  SAFETY GUARD: Milestone 4.1 data correction script requires explicit confirmation.');
+  console.warn(`   Target database: ${path.basename(dbPath)}`);
+  console.warn('   To run this correction against the configured database, re-run with: --confirm-correction');
+  process.exit(0);
+}
+
+// Safety Guard 2: Require additional explicit flag if targeting the protected live database
+const isLive = isLiveDatabase(dbPath);
+if (isLive && !process.argv.includes('--allow-live-correction')) {
+  console.error('⛔ CRITICAL SAFETY GUARD: Target database resolves to the protected live database (cares.db).');
+  console.error('   Direct mutation of the live database requires "--allow-live-correction" in addition to "--confirm-correction".');
+  process.exit(1);
+}
+
+const backupDir = path.dirname(dbPath);
+const dbName = path.basename(dbPath);
+const backupPath = path.join(backupDir, `${dbName}.backup.${new Date().toISOString().replace(/[:.]/g, '-')}`);
+
 console.log(`Database Path: ${dbPath}`);
 console.log(`Backup Target: ${backupPath}`);
 

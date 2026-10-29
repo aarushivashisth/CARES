@@ -14,6 +14,7 @@ import PatientDashboard from './pages/PatientDashboard.jsx';
 import DoctorDashboard from './pages/DoctorDashboard.jsx';
 import HospitalDashboard from './pages/HospitalDashboard.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
+import EmergencyResources from './pages/EmergencyResources.jsx';
 
 const services = [
   {
@@ -50,7 +51,7 @@ const services = [
     description:
       'Prepare essential patient information for your selected hospital.',
     link: 'Emergency information',
-    href: '#emergency',
+    href: '/emergency',
   },
 ]
 
@@ -111,7 +112,7 @@ function HomePage() {
 
             <p className="location-note">
               <span>♧</span> Exploring care in Chandigarh, India
-              <a href="#hospitals">Change</a>
+              <Link to="/hospitals">Change</Link>
             </p>
           </div>
 
@@ -226,12 +227,12 @@ function HomePage() {
               waits in one clear view. More context for your non-urgent visit.
             </p>
 
-            <a
-              href="#department-insights"
+            <Link
+              to="/hospitals"
               className="primary-button"
             >
               Explore hospital insights <span>→</span>
-            </a>
+            </Link>
 
             <small>
               Illustrative data, not live monitoring. Never delay urgent care
@@ -387,9 +388,9 @@ function HomePage() {
             <p>
               Prepare essential patient details and find emergency resources.
             </p>
-            <a href="#emergency-safety">
+            <Link to="/emergency">
               View emergency guidance ↗
-            </a>
+            </Link>
           </div>
 
           <div className="extra-feature" id="my-care">
@@ -515,6 +516,16 @@ function App() {
           element={
             <SiteLayout>
               <HospitalDetail />
+            </SiteLayout>
+          }
+        />
+
+        {/* Emergency Resources & Guidance */}
+        <Route
+          path="/emergency"
+          element={
+            <SiteLayout>
+              <EmergencyResources />
             </SiteLayout>
           }
         />

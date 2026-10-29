@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/useAuth.js';
 import { api } from '../services/apiClient.js';
 import './Dashboard.css';
@@ -10,6 +10,11 @@ export default function DoctorDashboard() {
   const [error, setError] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
   const [actionNotice, setActionNotice] = useState(null);
+
+  // Accessible Appointment Action Dialog state (Decline, Cancel, Complete with Notes)
+  const [actionDialog, setActionDialog] = useState(null);
+  const dialogRef = useRef(null);
+  const triggerRef = useRef(null);
 
   const [verificationData, setVerificationData] = useState(null);
   const [verificationLoading, setVerificationLoading] = useState(false);
@@ -477,31 +482,199 @@ export default function DoctorDashboard() {
     }
   };
 
-  const todayLocal = new Date().toLocaleDateString("en-CA");
+  const todayLocal = (() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  })();
 
-  const handleStatusChange = async (appointmentId, newStatus, customNotes = null) => {
-    let finalNotes = customNotes;
-
-    if (newStatus === 'declined' && finalNotes === null) {
-      const input = window.prompt('Please enter an optional reason for declining this request:');
-      if (input === null) return;
-      finalNotes = input.trim() || 'Provider schedule unavailable';
+  const handleCloseDialog = useCallback(() => {
+    if (actionDialog?.submitting) return;
+    setActionDialog(null);
+    if (triggerRef.current && typeof triggerRef.current.focus === 'function') {
+      triggerRef.current.focus();
     }
+  }, [actionDialog]);
 
-    if (newStatus === 'cancelled' && finalNotes === null) {
-      const input = window.prompt('A cancellation reason is required (minimum 5 characters):');
-      if (input === null) return;
-      if (!input.trim() || input.trim().length < 5) {
-        alert('A cancellation reason of at least 5 characters is required.');
+  // Keyboard navigation & accessibility for Action Dialog: Escape to dismiss, initial focus, focus trap
+  useEffect(() => {
+    if (!actionDialog) return;
+
+    const timer = setTimeout(() => {
+      if (dialogRef.current) {
+        const input = dialogRef.current.querySelector('textarea, input, button:not([aria-label="Close dialog"])');
+        if (input) input.focus();
+      }
+    }, 20);
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCloseDialog();
         return;
       }
-      finalNotes = input.trim();
+
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusables = Array.from(
+          dialogRef.current.querySelectorAll(
+            'input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        );
+
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [actionDialog, handleCloseDialog]);
+
+  const handleOpenDeclineDialog = (appt, e) => {
+    triggerRef.current = e?.currentTarget || null;
+    setActionDialog({
+      appointment: appt,
+      status: 'declined',
+      notes: '',
+      validationError: null,
+      apiError: null,
+      submitting: false,
+    });
+  };
+
+  const handleOpenCancelDialog = (appt, e) => {
+    triggerRef.current = e?.currentTarget || null;
+    setActionDialog({
+      appointment: appt,
+      status: 'cancelled',
+      notes: '',
+      validationError: null,
+      apiError: null,
+      submitting: false,
+    });
+  };
+
+  const handleOpenCompleteDialog = (appt, e) => {
+    triggerRef.current = e?.currentTarget || null;
+    setActionDialog({
+      appointment: appt,
+      status: 'completed',
+      notes: 'Consultation successfully completed',
+      validationError: null,
+      apiError: null,
+      submitting: false,
+    });
+  };
+
+  const handleDialogSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!actionDialog || actionDialog.submitting) return;
+
+    const { appointment, status, notes } = actionDialog;
+    const trimmedNotes = (notes || '').trim();
+
+    // Cancellation requires at least 5 characters
+    if (status === 'cancelled') {
+      if (!trimmedNotes || trimmedNotes.length < 5) {
+        setActionDialog(prev => ({
+          ...prev,
+          validationError: 'A cancellation reason of at least 5 characters is required.',
+        }));
+        return;
+      }
     }
 
-    if (newStatus === 'completed') {
-      const ok = window.confirm(`Mark appointment #${appointmentId} as completed?`);
-      if (!ok) return;
+    // Notes length boundary (max 500 characters)
+    if (trimmedNotes.length > 500) {
+      setActionDialog(prev => ({
+        ...prev,
+        validationError: 'Notes cannot exceed 500 characters.',
+      }));
+      return;
+    }
+
+    let finalNotes = trimmedNotes;
+    if (status === 'declined' && !finalNotes) {
+      finalNotes = 'Provider schedule unavailable';
+    } else if (status === 'completed' && !finalNotes) {
       finalNotes = 'Consultation successfully completed';
+    }
+
+    setActionDialog(prev => ({ ...prev, submitting: true, validationError: null, apiError: null }));
+    setUpdatingId(appointment.id);
+    setActionNotice(null);
+
+    try {
+      const res = await api.patch(`/doctor/portal/appointments/${appointment.id}/status`, {
+        status,
+        notes: finalNotes || `Physician updated status to ${status}`,
+      });
+
+      if (res.success) {
+        setActionNotice({
+          type: 'success',
+          message: `Appointment #${appointment.id} has been successfully ${status}.`,
+        });
+        setActionDialog(null);
+        if (triggerRef.current && typeof triggerRef.current.focus === 'function') {
+          triggerRef.current.focus();
+        }
+        await loadDoctorData();
+      } else {
+        // Retain input and display server error within dialog
+        setActionDialog(prev => ({
+          ...prev,
+          submitting: false,
+          apiError: res.error || `Failed to update appointment to ${status}.`,
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to update appointment status:', err);
+      // Retain input and display network/server error within dialog
+      setActionDialog(prev => ({
+        ...prev,
+        submitting: false,
+        apiError: err.message || `Unable to ${status} appointment #${appointment.id}.`,
+      }));
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleStatusChange = async (appointmentId, newStatus, customNotes = null) => {
+    // If called without customNotes for workflows requiring input, open accessible dialog
+    if (customNotes === null && ['declined', 'cancelled', 'completed'].includes(newStatus)) {
+      const appt = data?.appointments?.find(a => a.id === appointmentId) || { id: appointmentId };
+      if (newStatus === 'declined') {
+        handleOpenDeclineDialog(appt);
+      } else if (newStatus === 'cancelled') {
+        handleOpenCancelDialog(appt);
+      } else if (newStatus === 'completed') {
+        handleOpenCompleteDialog(appt);
+      }
+      return;
     }
 
     setUpdatingId(appointmentId);
@@ -510,7 +683,7 @@ export default function DoctorDashboard() {
     try {
       const res = await api.patch(`/doctor/portal/appointments/${appointmentId}/status`, {
         status: newStatus,
-        notes: finalNotes || `Physician updated status to ${newStatus}`,
+        notes: customNotes || `Physician updated status to ${newStatus}`,
       });
 
       if (res.success) {
@@ -687,7 +860,7 @@ export default function DoctorDashboard() {
                                   type="button"
                                   className="dashboard-decline-btn"
                                   disabled={isBusy}
-                                  onClick={() => handleStatusChange(appt.id, 'declined')}
+                                  onClick={(e) => handleOpenDeclineDialog(appt, e)}
                                 >
                                   {isBusy ? 'Saving...' : '✕ Decline'}
                                 </button>
@@ -701,7 +874,7 @@ export default function DoctorDashboard() {
                                   className="dashboard-complete-btn"
                                   disabled={isBusy || isFuture}
                                   title={isFuture ? `Can only complete visit on or after ${appt.requested_date}` : 'Mark consultation as completed'}
-                                  onClick={() => handleStatusChange(appt.id, 'completed')}
+                                  onClick={(e) => handleOpenCompleteDialog(appt, e)}
                                 >
                                   {isBusy ? 'Saving...' : '✓ Complete'}
                                 </button>
@@ -709,7 +882,7 @@ export default function DoctorDashboard() {
                                   type="button"
                                   className="dashboard-cancel-btn"
                                   disabled={isBusy}
-                                  onClick={() => handleStatusChange(appt.id, 'cancelled')}
+                                  onClick={(e) => handleOpenCancelDialog(appt, e)}
                                 >
                                   {isBusy ? 'Saving...' : 'Cancel Visit'}
                                 </button>
@@ -1258,6 +1431,186 @@ export default function DoctorDashboard() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Milestone 5 / Phase 2: Accessible Appointment Workflow Dialogs */}
+      {actionDialog && (
+        <div
+          ref={dialogRef}
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="appointment-dialog-title"
+          aria-describedby="appointment-dialog-desc"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !actionDialog.submitting) {
+              handleCloseDialog();
+            }
+          }}
+        >
+          <div className="modal-content" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 id="appointment-dialog-title">
+                  {actionDialog.status === 'declined' && 'Decline Appointment Request'}
+                  {actionDialog.status === 'cancelled' && 'Cancel Confirmed Appointment'}
+                  {actionDialog.status === 'completed' && 'Complete Consultation'}
+                </h2>
+                <p
+                  id="appointment-dialog-desc"
+                  style={{ fontSize: '13px', color: '#68776e', margin: '4px 0 0' }}
+                >
+                  {actionDialog.status === 'declined' && (
+                    <>Decline request #{actionDialog.appointment.id} for <strong>{actionDialog.appointment.patient_name || `Patient #${actionDialog.appointment.patient_id}`}</strong>.</>
+                  )}
+                  {actionDialog.status === 'cancelled' && (
+                    <>Cancel appointment #{actionDialog.appointment.id} for <strong>{actionDialog.appointment.patient_name || `Patient #${actionDialog.appointment.patient_id}`}</strong>.</>
+                  )}
+                  {actionDialog.status === 'completed' && (
+                    <>Confirm completion of consultation #{actionDialog.appointment.id} for <strong>{actionDialog.appointment.patient_name || `Patient #${actionDialog.appointment.patient_id}`}</strong>.</>
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                aria-label="Close dialog"
+                disabled={actionDialog.submitting}
+                onClick={handleCloseDialog}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Appointment Summary Box */}
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginBottom: '16px',
+                fontSize: '13px',
+                color: '#334155',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span><strong>Date:</strong> {actionDialog.appointment.requested_date || 'N/A'}</span>
+                <span><strong>Slot:</strong> {actionDialog.appointment.preferred_slot || 'N/A'}</span>
+              </div>
+              <div>
+                <span><strong>Type:</strong> {actionDialog.appointment.visit_type || 'In-person'}</span>
+                {actionDialog.appointment.reason_for_visit && (
+                  <span> · <strong>Reason:</strong> {actionDialog.appointment.reason_for_visit}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Completion Notice */}
+            {actionDialog.status === 'completed' && (
+              <p style={{ fontSize: '13px', color: '#475569', marginBottom: '14px', lineHeight: 1.4 }}>
+                Please verify that the consultation has concluded. Recording consultation notes will finalize this appointment and update the patient's care history.
+              </p>
+            )}
+
+            {/* Server / API Error Notice */}
+            {actionDialog.apiError && (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px 14px',
+                  marginBottom: '16px',
+                  borderRadius: '6px',
+                  background: '#fde8e8',
+                  color: '#9b1c1c',
+                  border: '1px solid #f8b4b4',
+                  fontSize: '13px',
+                }}
+              >
+                {actionDialog.apiError}
+              </div>
+            )}
+
+            <form onSubmit={handleDialogSubmit}>
+              <div className="modal-field">
+                <label htmlFor="appointment-action-notes">
+                  {actionDialog.status === 'declined' && 'Reason for declining (optional)'}
+                  {actionDialog.status === 'cancelled' && 'Cancellation Reason *'}
+                  {actionDialog.status === 'completed' && 'Consultation Notes'}
+                </label>
+                <textarea
+                  id="appointment-action-notes"
+                  rows={3}
+                  className={`modal-input ${actionDialog.validationError ? 'error' : ''}`}
+                  value={actionDialog.notes}
+                  disabled={actionDialog.submitting}
+                  placeholder={
+                    actionDialog.status === 'declined'
+                      ? 'e.g. Provider schedule unavailable, referral recommended...'
+                      : actionDialog.status === 'cancelled'
+                      ? 'Provide a clear reason for cancellation (minimum 5 characters)...'
+                      : 'Enter clinical consultation summary, observations, or follow-up instructions...'
+                  }
+                  onChange={(e) => {
+                    setActionDialog(prev => ({
+                      ...prev,
+                      notes: e.target.value,
+                      validationError: null,
+                    }));
+                  }}
+                />
+                {actionDialog.validationError && (
+                  <span className="field-error-text" role="alert">
+                    {actionDialog.validationError}
+                  </span>
+                )}
+                <span className="field-help-text" style={{ fontSize: '11px', color: '#64748b' }}>
+                  {actionDialog.status === 'declined' && 'Will default to "Provider schedule unavailable" if left empty.'}
+                  {actionDialog.status === 'cancelled' && 'Required: Minimum 5 characters, maximum 500 characters.'}
+                  {actionDialog.status === 'completed' && 'Will be recorded into the appointment history (max 500 characters).'}
+                </span>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={actionDialog.submitting}
+                  onClick={handleCloseDialog}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={actionDialog.submitting}
+                  style={{
+                    background:
+                      actionDialog.status === 'declined'
+                        ? '#dc2626'
+                        : actionDialog.status === 'cancelled'
+                        ? '#b91c1c'
+                        : '#15803d',
+                    borderColor:
+                      actionDialog.status === 'declined'
+                        ? '#b91c1c'
+                        : actionDialog.status === 'cancelled'
+                        ? '#991b1b'
+                        : '#166534',
+                  }}
+                >
+                  {actionDialog.submitting
+                    ? 'Processing...'
+                    : actionDialog.status === 'declined'
+                    ? 'Decline Request'
+                    : actionDialog.status === 'cancelled'
+                    ? 'Confirm Cancellation'
+                    : 'Complete Consultation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </main>
   );
