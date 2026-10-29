@@ -1,0 +1,15 @@
+{
+  "scope": "Heuristic source/production-bundle pattern scan plus tracked-file and archive entry-name review; not a full security certification. No database or ignored secret env contents opened.",
+  "sourceFilesConsidered": 152,
+  "trackedDatabasesOrPrivateEnv": [],
+  "potentialSecrets": [],
+  "archiveNamesOnly": [
+    {
+      "file": "CARES-source-clean.zip",
+      "sensitiveNamedEntries": [],
+      "contentRead": false
+    }
+  ],
+  "frontendBundleFindings": [],
+  "passed": true
+}

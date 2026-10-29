@@ -1,16 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { config } from '../config/env.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { config, isLiveDatabase, resolveDatabasePath } from '../config/env.js';
 
 // Ensure data directory exists
-const dbFilePath = path.isAbsolute(config.databasePath)
-  ? config.databasePath
-  : path.resolve(__dirname, '../../', config.databasePath);
+const dbFilePath = resolveDatabasePath(config.databasePath);
 
 const dbDir = path.dirname(dbFilePath);
 if (!fs.existsSync(dbDir)) {
@@ -22,6 +16,10 @@ let dbInstance = null;
 
 export function getDb() {
   if (!dbInstance) {
+    const realTarget = fs.existsSync(dbFilePath) ? fs.realpathSync(dbFilePath) : dbFilePath;
+    if ((isLiveDatabase(dbFilePath) || isLiveDatabase(realTarget)) && !config.allowProtectedDatabase) {
+      throw new Error('Protected live database access requires explicit owner authorization and ALLOW_PROTECTED_DATABASE=true. Use a new isolated DATABASE_PATH.');
+    }
     dbInstance = new DatabaseSync(dbFilePath);
     // Enable foreign key constraints
     dbInstance.exec('PRAGMA foreign_keys = ON;');

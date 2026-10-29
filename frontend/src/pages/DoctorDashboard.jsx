@@ -1212,8 +1212,8 @@ export default function DoctorDashboard() {
                         </p>
                         <div style={{ fontSize: '12px', color: '#374151', lineHeight: '1.6' }}>
                           <div><strong>Registration #:</strong> {verificationData?.doctor?.licenseNumber}</div>
-                          <div><strong>Issuing Council:</strong> {verificationData?.doctor?.issuingCouncil || 'State Medical Council'}</div>
-                          <div><strong>Qualifications:</strong> {verificationData?.doctor?.qualifications || 'Medical Degree'}</div>
+                          <div><strong>Issuing Council:</strong> {verificationData?.doctor?.issuingCouncil || 'Not recorded'}</div>
+                          <div><strong>Qualifications:</strong> {verificationData?.doctor?.qualifications || 'Not recorded'}</div>
                           {verificationData?.doctor?.verifiedAt && (
                             <div><strong>Verified On:</strong> {verificationData?.doctor?.verifiedAt}</div>
                           )}
@@ -1415,7 +1415,7 @@ export default function DoctorDashboard() {
                   </div>
                   <div>
                     <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>QUALIFICATIONS</span>
-                    <strong>{verificationData?.doctor?.qualifications || 'MBBS / Specialist'}</strong>
+                    <strong>{verificationData?.doctor?.qualifications || 'Not recorded'}</strong>
                   </div>
                   <div>
                     <span style={{ color: '#68776e', display: 'block', fontSize: '11px' }}>AFFILIATED HOSPITAL</span>

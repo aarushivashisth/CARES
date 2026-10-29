@@ -1,5 +1,7 @@
 # CARES Platform — Comprehensive Project Context & Architecture Reference
 
+> **Update 2026-10-29:** This file preserves the original baseline audit except the replaced deployment roadmap. Current implementation/status/evidence live in `docs/IMPLEMENTATION_TRACKER.md`, `docs/ARCHITECTURE.md` and `docs/TEST_EVIDENCE.md`; earlier proposed/absent-feature statements below are historical.
+>
 > **Document Classification:** Persistent Project Reference for AI Coding Agents and Human Engineers  
 > **Repository Location:** `C:\Users\Hp\Desktop\CARES`  
 > **Target Output Path:** `PROJECT_CONTEXT.md`  
@@ -132,7 +134,7 @@ All technologies listed below have been verified directly against `package.json`
 | **Persistence** | Embedded SQLite 3 (`cares.db`, `cares.demo.db`, `cares.test.db`) | PostgreSQL, MySQL, MongoDB, Redis, DynamoDB |
 | **ML / DL** | *None* | Scikit-learn, PyTorch, TensorFlow, Hugging Face, TF-IDF |
 | **LLM / RAG** | *None* | OpenAI SDK, Anthropic SDK, LangChain, LlamaIndex, ChromaDB, FAISS |
-| **Cloud / Infra** | Local Node processes, `.env.example` templates | AWS S3, CloudFront, ECS Fargate, App Runner, RDS, Dockerfile, Terraform |
+| **Cloud / Infra** | Local Node processes, `.env.example` templates | Vercel static hosting/Node functions, managed PostgreSQL |
 
 ---
 
@@ -769,52 +771,11 @@ To provide an interactive, conversational patient guidance assistant that answer
 
 ---
 
-## Section M: Deployment Roadmap
+## Section M: Deployment Roadmap (updated 2026-10-29)
 
-> [!NOTE]
-> All infrastructure elements below represent planned cloud deployment targets for AWS. No cloud resources are currently provisioned.
+The active deployment target is Vercel static React/Vite plus a Vercel Node 24 Express function and durable managed PostgreSQL through a pooled TLS connection. The lightweight trained model and versioned local vector index are bundled with the backend. Real generation uses an owner-configured Anthropic Messages API key/model.
 
-```
-                                      AWS Cloud Infrastructure (Planned)
-┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                                        │
-│   ┌────────────────────────┐         ┌─────────────────────────┐         ┌─────────────────────────┐   │
-│   │   Amazon CloudFront    │ ──────► │    Amazon S3 Bucket     │         │      Route 53 + ACM     │   │
-│   │   (Global Edge CDN)    │         │ (Compiled React 19 SPA) │         │    (HTTPS Termination)  │   │
-│   └───────────┬────────────┘         └─────────────────────────┘         └────────────┬────────────┘   │
-│               │                                                                       │                │
-│               │ /api/* Requests                                                       │                │
-│               ▼                                                                       ▼                │
-│   ┌────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                          Application Load Balancer (ALB) / TLS                                 │   │
-│   └───────────────────────────────────────────┬────────────────────────────────────────────────────┘   │
-│                                               │                                                        │
-│                                               ▼                                                        │
-│   ┌────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │               AWS ECS Fargate Container Cluster / AWS App Runner (Express API)                 │   │
-│   │               - Node.js 18+ container instances                                                │   │
-│   │               - Parameter Store / Secrets Manager for JWT_SECRET                               │   │
-│   │               - CloudWatch Container Insights logging & metrics                                │   │
-│   └───────────────────────────────────────────┬────────────────────────────────────────────────────┘   │
-│                                               │                                                        │
-│                                               ▼                                                        │
-│   ┌────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                           Amazon RDS for PostgreSQL (Multi-AZ)                                 │   │
-│   │                           - Automated daily snapshots & point-in-time recovery                 │   │
-│   │                           - Encrypted at rest (AWS KMS)                                        │   │
-│   │                           - pgvector extension for RAG embeddings                              │   │
-│   └────────────────────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                                        │
-└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-1. **Frontend Hosting:** Compiled React single-page application hosted on Amazon S3 with an Amazon CloudFront distribution providing global SSL/TLS edge caching.
-2. **Compute Service:** Express REST API containerized with Docker and deployed to AWS ECS Fargate or AWS App Runner with auto-scaling policies.
-3. **Managed Database:** Migration from single-file SQLite to Amazon RDS for PostgreSQL (Multi-AZ) with automated backups, encryption at rest, and support for `pgvector`.
-4. **Secrets Management:** Storage of production `JWT_SECRET` and database credentials in AWS Secrets Manager or Systems Manager Parameter Store.
-5. **Observability:** Centralized logging, error alerts, and latency tracking via Amazon CloudWatch.
-
----
+No deployment, account creation, billable resource or live-data migration has been performed. Detailed current architecture, limits, environment variables, migrations, rollback and recovery gates are in `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT_GUIDE.md` and `MANUAL_ACTIONS_REQUIRED.md`. SQLite remains an explicitly selected local development option and is refused by the Vercel function.
 
 ## Section N: Prioritized Backlog and Seven-Day Plan
 
@@ -830,7 +791,7 @@ This roadmap provides a realistic, milestone-based execution plan. Reliability, 
  [Day 4] CareMatch ML Intent Classifier  ◄── [Day 3] Provenance, Care at Home, & Emergency Page
         │
         ▼
- [Day 5] CARES AI Care Navigator (RAG)   ──► [Day 6] AI Integration & AWS Preparation
+ [Day 5] CARES AI Care Navigator (RAG)   ──► [Day 6] AI Integration & Vercel/PostgreSQL Preparation
                                                               │
                                                               ▼
                                              [Day 7] Final Regression, Audit, & Demo
@@ -883,7 +844,7 @@ This roadmap provides a realistic, milestone-based execution plan. Reliability, 
 - **Dependencies:** Vector storage mechanism, embedding model.
 - **Risks:** Hallucinated clinical advice. *Mitigation: Zero-temperature sampling, strict system boundary prompts, human-in-the-loop disclaimers.*
 
-### Day 6: Integrate AI into Existing Pages, Run Regression Tests, and Prepare AWS Deployment
+### Day 6: Integrate AI into Existing Pages, Run Regression Tests, and Prepare Vercel Deployment
 - **Prerequisites:** Days 4 and 5 completion.
 - **Expected Deliverables:**
   - Embed CareMatch ML search bar into `DoctorDiscovery.jsx`.

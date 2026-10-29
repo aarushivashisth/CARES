@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import { db } from '../db/connection.js';
+import { Router } from '../middleware/asyncRouter.js';
+import { db } from '../db/database.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { validateBody } from '../middleware/validateMiddleware.js';
@@ -13,8 +13,8 @@ router.use(authenticateToken, requireRole('hospital'));
  * GET /api/hospital/dashboard
  * Protected hospital / clinic facility portal
  */
-router.get('/dashboard', (req, res) => {
-  const hospital = db.get(
+router.get('/dashboard', async (req, res) => {
+  const hospital = await db.get(
     `SELECT * FROM hospitals WHERE user_id = ?`,
     [req.user.id]
   );
@@ -28,7 +28,7 @@ router.get('/dashboard', (req, res) => {
   }
 
   // Get currently affiliated doctors with detailed verification and provenance fields
-  const affiliatedDoctors = db.all(
+  const affiliatedDoctors = await db.all(
     `SELECT 
        d.id, d.full_name, d.specialty, d.rating, d.is_verified, d.verification_status,
        d.license_number, d.issuing_council, d.qualifications, d.experience_years,
@@ -41,7 +41,7 @@ router.get('/dashboard', (req, res) => {
   );
 
   // Get system doctors not currently affiliated with this facility (for affiliation management)
-  const availableDoctors = db.all(
+  const availableDoctors = await db.all(
     `SELECT d.id, d.full_name, d.specialty, d.license_number, d.verification_status
      FROM doctor_profiles d
      WHERE d.id NOT IN (
@@ -63,7 +63,7 @@ router.get('/dashboard', (req, res) => {
         phone: hospital.phone || 'Unavailable',
         email: hospital.email || 'Unavailable',
         websiteUrl: hospital.website_url || null,
-        operatingHours: JSON.parse(hospital.operating_hours_json || '{"regular":"08:00 - 20:00","emergency":"24/7"}'),
+        operatingHours: JSON.parse(hospital.operating_hours_json || '{}'),
         crowdLevel: hospital.crowd_level,
         emergencyAvailable: Boolean(hospital.emergency_available),
         isVerified: Boolean(hospital.is_verified === 1 && hospital.verification_status === 'verified'),
@@ -95,9 +95,9 @@ router.get('/dashboard', (req, res) => {
  * Update facility operating details, website, contact, and departments.
  * Strictly scoped to the authenticated manager's assigned hospital.
  */
-router.put('/profile', (req, res) => {
+router.put('/profile', async (req, res) => {
 
-  const hospital = db.get(
+  const hospital = await db.get(
     `SELECT id, name FROM hospitals WHERE user_id = ?`,
     [req.user.id]
   );
@@ -130,8 +130,24 @@ router.put('/profile', (req, res) => {
   const operating_hours_json = req.body.operating_hours_json || (req.body.operating_hours ? JSON.stringify(req.body.operating_hours) : null);
   const departments_json = req.body.departments ? JSON.stringify(req.body.departments) : (req.body.departments_json || null);
 
-  db.transaction((tx) => {
-    tx.run(
+  const invalid = message => res.status(400).json({success:false,error:message,code:'INVALID_PROFILE'});
+  for (const [field,value] of Object.entries({name,address,city,state,phone,email,website_url})) {
+    if (value !== undefined && value !== null && (typeof value !== 'string' || value.length > 300)) return invalid(`${field} must be text of at most 300 characters.`);
+  }
+  if (name !== undefined && name.trim().length < 2) return invalid('Facility name is required.');
+  if (website_url) { try { if (!['https:','http:'].includes(new URL(website_url).protocol)) return invalid('Website must use HTTP or HTTPS.'); } catch { return invalid('Enter a valid website URL.'); } }
+  if (emergency_available !== undefined && ![true,false,0,1,null].includes(emergency_available)) return invalid('Emergency availability must be boolean or unknown.');
+  if (operating_hours_json) {
+    try { const hours=JSON.parse(operating_hours_json); if (!hours || typeof hours!=='object' || Array.isArray(hours) || Object.values(hours).some(v=>typeof v!=='string'||v.length>300)) return invalid('Operating hours must be a JSON object of text values.'); }
+    catch { return invalid('Operating hours must be valid JSON.'); }
+  }
+  if (departments_json) {
+    try { const departments=JSON.parse(departments_json); if (!Array.isArray(departments) || departments.length>80 || departments.some(d=>typeof d!=='string'||!d.trim()||d.length>100)) return invalid('Departments must be an array of department names.'); }
+    catch { return invalid('Departments must be valid JSON.'); }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.run(
       `UPDATE hospitals
        SET name = COALESCE(?, name),
            address = COALESCE(?, address),
@@ -161,7 +177,7 @@ router.put('/profile', (req, res) => {
       ]
     );
 
-    tx.run(
+    await tx.run(
       `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
        VALUES (?, 'HOSPITAL_PROFILE_UPDATED', 'HOSPITAL', ?, ?, ?)`,
       [
@@ -173,7 +189,7 @@ router.put('/profile', (req, res) => {
     );
   });
 
-  const updatedHospital = db.get(
+  const updatedHospital = await db.get(
     `SELECT * FROM hospitals WHERE id = ? AND user_id = ?`,
     [hospital.id, req.user.id]
   );
@@ -194,10 +210,10 @@ router.post(
   validateBody({
     doctor_id: { required: true },
   }),
-  (req, res) => {
+  async (req, res) => {
     const { doctor_id, role_at_facility, distance_text } = req.body;
 
-    const hospital = db.get(
+    const hospital = await db.get(
       `SELECT id, name FROM hospitals WHERE user_id = ?`,
       [req.user.id]
     );
@@ -211,7 +227,7 @@ router.post(
     }
 
     const doctorIdInt = parseInt(doctor_id, 10);
-    const doctor = db.get(
+    const doctor = await db.get(
       `SELECT id, full_name FROM doctor_profiles WHERE id = ?`,
       [doctorIdInt]
     );
@@ -225,7 +241,7 @@ router.post(
     }
 
     // Check if affiliation already exists
-    const existing = db.get(
+    const existing = await db.get(
       `SELECT id FROM doctor_hospital_affiliations WHERE doctor_id = ? AND hospital_id = ?`,
       [doctorIdInt, hospital.id]
     );
@@ -240,8 +256,8 @@ router.post(
 
     const todayStr = new Date().toISOString().split('T')[0];
 
-    db.transaction((tx) => {
-      tx.run(
+    await db.transaction(async (tx) => {
+      await tx.run(
         `INSERT INTO doctor_hospital_affiliations (
           doctor_id, hospital_id, role_at_facility, distance_text, affiliation_source, last_checked_date, is_primary
         ) VALUES (?, ?, ?, ?, 'Hospital Management Portal', ?, 0)`,
@@ -254,7 +270,7 @@ router.post(
         ]
       );
 
-      tx.run(
+      await tx.run(
         `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
          VALUES (?, 'DOCTOR_AFFILIATION_ADDED', 'HOSPITAL', ?, ?, ?)`,
         [
@@ -277,10 +293,10 @@ router.post(
  * DELETE /api/hospital/affiliations/:doctorId
  * Remove a doctor affiliation from the authenticated hospital
  */
-router.delete('/affiliations/:doctorId', (req, res) => {
+router.delete('/affiliations/:doctorId', async (req, res) => {
   const doctorIdInt = parseInt(req.params.doctorId, 10);
 
-  const hospital = db.get(
+  const hospital = await db.get(
     `SELECT id, name FROM hospitals WHERE user_id = ?`,
     [req.user.id]
   );
@@ -293,7 +309,7 @@ router.delete('/affiliations/:doctorId', (req, res) => {
     });
   }
 
-  const existing = db.get(
+  const existing = await db.get(
     `SELECT id FROM doctor_hospital_affiliations WHERE doctor_id = ? AND hospital_id = ?`,
     [doctorIdInt, hospital.id]
   );
@@ -306,13 +322,13 @@ router.delete('/affiliations/:doctorId', (req, res) => {
     });
   }
 
-  db.transaction((tx) => {
-    tx.run(
+  await db.transaction(async (tx) => {
+    await tx.run(
       `DELETE FROM doctor_hospital_affiliations WHERE doctor_id = ? AND hospital_id = ?`,
       [doctorIdInt, hospital.id]
     );
 
-    tx.run(
+    await tx.run(
       `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
        VALUES (?, 'DOCTOR_AFFILIATION_REMOVED', 'HOSPITAL', ?, ?, ?)`,
       [

@@ -170,7 +170,7 @@ export default function HospitalDetail() {
             {/* Emergency Service Badge */}
             {hospital.emergencyAvailable === true ? (
               <span className="hospital-badge emergency" title="Reported in public directory as providing emergency services">
-                🚨 24/7 Emergency (Directory Reported)
+                {hospital.operatingHours?.emergency === '24/7' ? '🚨 24/7 Emergency (Directory Reported)' : 'Emergency services listed — hours unknown'}
               </span>
             ) : hospital.emergencyAvailable === false ? (
               <span className="hospital-badge no-emergency" title="No dedicated 24/7 emergency unit">

@@ -20,8 +20,8 @@ export default function HospitalDashboard() {
     state: '',
     phone: '',
     website_url: '',
-    regularHours: '08:00 - 20:00',
-    emergencyHours: '24/7 Everyday',
+    regularHours: '',
+    emergencyHours: '',
     emergency_available: true,
   });
 
@@ -40,12 +40,12 @@ export default function HospitalDashboard() {
       if (res.success) {
         setData(res.data);
         const fac = res.data.facility;
-        let opHours = { regular: '08:00 - 20:00', emergency: '24/7 Everyday' };
+        let opHours = {};
         if (fac?.operating_hours_json) {
           try {
             opHours = JSON.parse(fac.operating_hours_json);
           } catch {
-            opHours = { regular: fac.operating_hours_json, emergency: '24/7' };
+            opHours = { regular: fac.operating_hours_json };
           }
         }
         setProfileForm({
@@ -55,8 +55,8 @@ export default function HospitalDashboard() {
           state: fac?.state || '',
           phone: fac?.phone || '',
           website_url: fac?.website_url || '',
-          regularHours: opHours?.regular || opHours?.opd || '08:00 - 20:00',
-          emergencyHours: opHours?.emergency || '24/7 Everyday',
+          regularHours: opHours?.regular || opHours?.opd || '',
+          emergencyHours: opHours?.emergency || '',
           emergency_available: Boolean(fac?.emergency_available),
         });
       }
@@ -77,12 +77,12 @@ export default function HospitalDashboard() {
         if (res.success) {
           setData(res.data);
           const fac = res.data.facility;
-          let opHours = { regular: '08:00 - 20:00', emergency: '24/7 Everyday' };
+          let opHours = {};
           if (fac?.operating_hours_json) {
             try {
               opHours = JSON.parse(fac.operating_hours_json);
             } catch {
-              opHours = { regular: fac.operating_hours_json, emergency: '24/7' };
+              opHours = { regular: fac.operating_hours_json };
             }
           }
           setProfileForm({
@@ -92,8 +92,8 @@ export default function HospitalDashboard() {
             state: fac?.state || '',
             phone: fac?.phone || '',
             website_url: fac?.website_url || '',
-            regularHours: opHours?.regular || opHours?.opd || '08:00 - 20:00',
-            emergencyHours: opHours?.emergency || '24/7 Everyday',
+            regularHours: opHours?.regular || opHours?.opd || '',
+            emergencyHours: opHours?.emergency || '',
             emergency_available: Boolean(fac?.emergency_available),
           });
         }
@@ -287,7 +287,7 @@ export default function HospitalDashboard() {
             <div className="dashboard-metric-card">
               <p>Emergency Department</p>
               <strong style={{ color: data?.facility?.emergency_available ? '#03543f' : '#92400e', fontSize: '20px' }}>
-                {data?.facility?.emergency_available ? '● Active 24/7' : '○ Not Equipped'}
+                {data?.facility?.emergency_available ? 'Emergency services recorded — confirm hours' : 'Emergency availability not confirmed'}
               </strong>
             </div>
             <div className="dashboard-metric-card">
@@ -333,6 +333,7 @@ export default function HospitalDashboard() {
                         </label>
                         <input
                           type="text"
+                          aria-label="Facility Name"
                           value={profileForm.name}
                           onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
                           required
@@ -345,6 +346,7 @@ export default function HospitalDashboard() {
                         </label>
                         <input
                           type="url"
+                          aria-label="Official Website URL"
                           value={profileForm.website_url}
                           onChange={(e) => setProfileForm({ ...profileForm, website_url: e.target.value })}
                           placeholder="https://hospital.example.org"
@@ -360,6 +362,7 @@ export default function HospitalDashboard() {
                         </label>
                         <input
                           type="text"
+                          aria-label="Street Address"
                           value={profileForm.address}
                           onChange={(e) => setProfileForm({ ...profileForm, address: e.target.value })}
                           style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
@@ -371,6 +374,7 @@ export default function HospitalDashboard() {
                         </label>
                         <input
                           type="text"
+                          aria-label="City"
                           value={profileForm.city}
                           onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
                           style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
@@ -382,6 +386,7 @@ export default function HospitalDashboard() {
                         </label>
                         <input
                           type="text"
+                          aria-label="Phone"
                           value={profileForm.phone}
                           onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
                           style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
@@ -396,6 +401,7 @@ export default function HospitalDashboard() {
                         </label>
                         <input
                           type="text"
+                          aria-label="OPD / Regular Operating Hours"
                           value={profileForm.regularHours}
                           onChange={(e) => setProfileForm({ ...profileForm, regularHours: e.target.value })}
                           placeholder="e.g. Mon–Sat 08:00–14:00"
@@ -408,6 +414,7 @@ export default function HospitalDashboard() {
                         </label>
                         <input
                           type="text"
+                          aria-label="Emergency Care Hours"
                           value={profileForm.emergencyHours}
                           onChange={(e) => setProfileForm({ ...profileForm, emergencyHours: e.target.value })}
                           placeholder="e.g. 24/7 Everyday"

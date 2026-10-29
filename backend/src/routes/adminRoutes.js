@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import { db } from '../db/connection.js';
+import { Router } from '../middleware/asyncRouter.js';
+import { db } from '../db/database.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { validateBody } from '../middleware/validateMiddleware.js';
@@ -13,12 +13,12 @@ router.use(authenticateToken, requireRole('admin'));
  * GET /api/admin/dashboard
  * Administrative console overview
  */
-router.get('/dashboard', (req, res) => {
-  const userCounts = db.all(
+router.get('/dashboard', async (req, res) => {
+  const userCounts = await db.all(
     `SELECT role, count(*) AS count FROM users GROUP BY role`
   );
 
-  const pendingVerifications = db.all(
+  const pendingVerifications = await db.all(
     `SELECT 
        v.id, v.target_type, v.target_id, v.submitted_license_number, v.status, v.created_at,
        u.email AS applicant_email,
@@ -31,7 +31,7 @@ router.get('/dashboard', (req, res) => {
      ORDER BY v.created_at DESC`
   );
 
-  const recentAuditEvents = db.all(
+  const recentAuditEvents = await db.all(
     `SELECT a.id, a.action, a.target_type, a.target_id, a.details_json, a.ip_address, a.created_at,
             u.email AS actor_email
      FROM audit_events a
@@ -40,7 +40,7 @@ router.get('/dashboard', (req, res) => {
      LIMIT 20`
   );
 
-  const totalAppointments = db.get(`SELECT count(*) as count FROM appointment_requests`);
+  const totalAppointments = await db.get(`SELECT count(*) as count FROM appointment_requests`);
 
   res.status(200).json({
     success: true,
@@ -64,8 +64,8 @@ router.get('/dashboard', (req, res) => {
  * GET /api/admin/verifications
  * List all provider and facility verification applications with full audit metadata
  */
-router.get('/verifications', (req, res) => {
-  const verifications = db.all(
+router.get('/verifications', async (req, res) => {
+  const verifications = await db.all(
     `SELECT 
        v.id, v.user_id, v.target_type, v.target_id, v.submitted_license_number,
        v.issuing_council, v.qualifications, v.supporting_evidence_json, v.affiliation_requested,
@@ -136,7 +136,7 @@ router.get('/verifications', (req, res) => {
  * GET /api/admin/verifications/:id
  * Retrieve details of a specific verification application
  */
-router.get('/verifications/:id', (req, res) => {
+router.get('/verifications/:id', async (req, res) => {
   const applicationId = parseInt(req.params.id, 10);
   if (isNaN(applicationId)) {
     return res.status(400).json({
@@ -146,7 +146,7 @@ router.get('/verifications/:id', (req, res) => {
     });
   }
 
-  const v = db.get(
+  const v = await db.get(
     `SELECT 
        v.id, v.user_id, v.target_type, v.target_id, v.submitted_license_number,
        v.issuing_council, v.qualifications, v.supporting_evidence_json, v.affiliation_requested,
@@ -209,14 +209,14 @@ router.post(
   validateBody({
     decision: { required: true, enum: ['approved', 'rejected', 'needs_clarification', 'suspended'] }
   }),
-  (req, res) => {
+  async (req, res) => {
     const decision = req.body.decision;
     const notes = req.body.notes;
     const reason = req.body.reason || req.body.decisionReason;
     const clarification_request = req.body.clarification_request || req.body.clarificationRequest;
     const applicationId = parseInt(req.params.id, 10);
 
-    const app = db.get(
+    const app = await db.get(
       `SELECT * FROM verification_applications WHERE id = ?`,
       [applicationId]
     );
@@ -267,9 +267,9 @@ router.post(
 
     const decisionReason = reason ? reason.trim() : (notes ? notes.trim() : `Administrative decision: ${decision}`);
 
-    db.transaction((tx) => {
+    await db.transaction(async (tx) => {
       // 1. Update application record
-      tx.run(
+      await tx.run(
         `UPDATE verification_applications
          SET status = ?, 
              review_notes = ?, 
@@ -291,7 +291,7 @@ router.post(
 
       // 2. Update the target entity (doctor or hospital)
       if (app.target_type === 'doctor') {
-        tx.run(
+        await tx.run(
           `UPDATE doctor_profiles
            SET is_verified = ?, 
                verification_status = ?, 
@@ -299,6 +299,7 @@ router.post(
                verified_by_user_id = ?,
                verification_notes = ?,
                registration_check_status = ?,
+               provenance_status = CASE WHEN is_synthetic = 0 AND ? = 'approved' THEN 'cares_verified' ELSE provenance_status END,
                updated_at = datetime('now')
            WHERE id = ?`,
           [
@@ -308,17 +309,18 @@ router.post(
             decision === 'approved' ? req.user.id : null,
             decisionReason,
             decision === 'approved' ? 'checked' : (decision === 'rejected' ? 'discrepancy_found' : 'unchecked'),
+            decision,
             app.target_id
           ]
         );
 
         if (decision === 'approved') {
-          tx.run(`UPDATE users SET status = 'active' WHERE id = ?`, [app.user_id]);
+          await tx.run(`UPDATE users SET status = 'active' WHERE id = ?`, [app.user_id]);
         } else if (decision === 'suspended') {
-          tx.run(`UPDATE users SET status = 'suspended' WHERE id = ?`, [app.user_id]);
+          await tx.run(`UPDATE users SET status = 'suspended' WHERE id = ?`, [app.user_id]);
         }
       } else if (app.target_type === 'hospital') {
-        tx.run(
+        await tx.run(
           `UPDATE hospitals
            SET is_verified = ?, 
                verification_status = ?, 
@@ -328,12 +330,12 @@ router.post(
         );
 
         if (decision === 'approved') {
-          tx.run(`UPDATE users SET status = 'active' WHERE id = ?`, [app.user_id]);
+          await tx.run(`UPDATE users SET status = 'active' WHERE id = ?`, [app.user_id]);
         }
       }
 
       // 3. Record in audit_events
-      tx.run(
+      await tx.run(
         `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
          VALUES (?, 'VERIFICATION_REVIEW', ?, ?, ?, ?)`,
         [

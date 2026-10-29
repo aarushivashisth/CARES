@@ -124,35 +124,35 @@ describe('Phase 3: Emergency Resources Page & Navigation (/emergency)', () => {
     expect(card112.textContent).toContain('112');
     expect(card112.textContent).toContain('National Emergency Helpline (ERSS)');
     expect(card112.textContent).toContain('Emergency Response Support System (ERSS), Ministry of Home Affairs');
-    expect(card112.querySelector('a').getAttribute('href')).toBe('tel:112');
+    expect(card112.querySelector('a.helpline-call-link').getAttribute('href')).toBe('tel:112');
 
     // 108 - Ambulance
     const card108 = screen.getByTestId('helpline-108');
     expect(card108.textContent).toContain('108');
     expect(card108.textContent).toContain('Ambulance & Disaster Medical Service');
     expect(card108.textContent).toContain('National Health Mission');
-    expect(card108.querySelector('a').getAttribute('href')).toBe('tel:108');
+    expect(card108.querySelector('a.helpline-call-link').getAttribute('href')).toBe('tel:108');
 
     // 102 - Maternal & Child
     const card102 = screen.getByTestId('helpline-102');
     expect(card102.textContent).toContain('102');
     expect(card102.textContent).toContain('Maternal & Neonatal Transport');
     expect(card102.textContent).toContain('Janani Shishu Suraksha Karyakram');
-    expect(card102.querySelector('a').getAttribute('href')).toBe('tel:102');
+    expect(card102.querySelector('a.helpline-call-link').getAttribute('href')).toBe('tel:102');
 
     // 1075 - MoHFW National Health
     const card1075 = screen.getByTestId('helpline-1075');
     expect(card1075.textContent).toContain('1075');
-    expect(card1075.textContent).toContain('National Health Helpline (MoHFW)');
+    expect(card1075.textContent).toContain('COVID-19 Helpline (MoHFW)');
     expect(card1075.textContent).toContain('Ministry of Health and Family Welfare');
-    expect(card1075.querySelector('a').getAttribute('href')).toBe('tel:1075');
+    expect(card1075.querySelector('a.helpline-call-link').getAttribute('href')).toBe('tel:1075');
 
     // 104 - State Medical Advice
     const card104 = screen.getByTestId('helpline-104');
     expect(card104.textContent).toContain('104');
     expect(card104.textContent).toContain('State Medical Advice Helpline');
     expect(card104.textContent).toContain('State Departments of Health');
-    expect(card104.querySelector('a').getAttribute('href')).toBe('tel:104');
+    expect(card104.querySelector('a.helpline-call-link').getAttribute('href')).toBe('tel:104');
 
     await waitFor(() => {
       expect(screen.getByTestId('emergency-facility-3')).toBeDefined();
@@ -236,7 +236,7 @@ describe('Phase 3: Emergency Resources Page & Navigation (/emergency)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('emergency-empty').textContent).toContain('No facilities in the directory currently report 24/7 emergency services');
+      expect(screen.getByTestId('emergency-empty').textContent).toContain('No facilities in the directory currently report emergency services');
     });
 
     cleanup();
@@ -303,5 +303,19 @@ describe('Phase 3: Emergency Resources Page & Navigation (/emergency)', () => {
     // Extra feature card
     const extraFeatureEmergencyLink = screen.getByRole('link', { name: /View emergency guidance ↗/i });
     expect(extraFeatureEmergencyLink.getAttribute('href')).toBe('/emergency');
+  });
+});
+
+describe('Emergency claim regressions', () => {
+  afterEach(()=>{cleanup();vi.restoreAllMocks();});
+  it('reports unknown hours without claiming 24/7 coverage and links regional sources', async()=>{
+    vi.spyOn(api,'get').mockResolvedValue({success:true,data:[{id:91,name:'Synthetic no-hours fixture',isSynthetic:true,operatingHours:{},emergencyAvailable:true}]});
+    render(<MemoryRouter><EmergencyResources/></MemoryRouter>);
+    const card=await screen.findByTestId('emergency-facility-91');
+    expect(card.textContent).toContain('Hours unknown');
+    expect(card.textContent).not.toContain('24/7');
+    expect(screen.getByTestId('helpline-108').textContent).toContain('vary by state/UT');
+    expect(screen.getByTestId('helpline-108').querySelector('a[href^="https://nhm.gov.in"]')).not.toBeNull();
+    expect(screen.queryByText(/108, 102, and 1075 operate nationwide/)).toBeNull();
   });
 });

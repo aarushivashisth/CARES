@@ -10,7 +10,10 @@
     "db:init": "node src/db/initDb.js",
     "db:seed": "node src/db/seed.js",
     "import:local": "node src/scripts/importLocalProviders.js",
-    "test": "node --test test/**/*.test.js"
+    "test": "node --test test/**/*.test.js",
+    "db:migrate:postgres": "node src/db/migrate.js",
+    "knowledge:build": "node src/scripts/buildKnowledge.js",
+    "evaluate:ai": "node src/scripts/evaluateAI.js"
   },
   "keywords": [
     "healthcare",
@@ -26,6 +29,13 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.13"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

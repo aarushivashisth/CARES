@@ -677,3 +677,10 @@
   border-top: 1px solid #e5e7eb;
   padding-top: 16px;
 }
+
+.care-form { max-width: 620px; display: grid; gap: 16px; margin: 28px 0; }
+.care-form label { display: grid; gap: 6px; font-weight: 600; }
+.care-form input, .care-form select, .care-form textarea { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #68776e; border-radius: 6px; font: inherit; }
+.care-requests { list-style: none; padding: 0; display: grid; gap: 16px; }
+.care-requests li { padding: 20px; border: 1px solid #dce4dc; border-radius: 8px; }
+.care-requests button { margin: 5px; min-height: 40px; }

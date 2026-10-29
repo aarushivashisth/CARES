@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import { db } from '../db/connection.js';
+import { Router } from '../middleware/asyncRouter.js';
+import { db } from '../db/database.js';
 
 const router = Router();
 
@@ -7,7 +7,7 @@ const router = Router();
  * GET /api/hospitals
  * Public healthcare facility directory with provenance and capacity information
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { city, emergency } = req.query;
 
   let query = `
@@ -36,7 +36,7 @@ router.get('/', (req, res) => {
 
   query += ` GROUP BY h.id ORDER BY h.id ASC`;
 
-  const hospitals = db.all(query, params);
+  const hospitals = await db.all(query, params);
 
   const formatted = hospitals.map((h) => ({
     id: h.id,
@@ -46,7 +46,7 @@ router.get('/', (req, res) => {
     state: h.state,
     phone: h.phone || null,
     websiteUrl: h.website_url || null,
-    operatingHours: JSON.parse(h.operating_hours_json || '{"regular":"08:00 - 20:00","emergency":"24/7"}'),
+    operatingHours: JSON.parse(h.operating_hours_json || '{}'),
     crowdLevel: h.is_synthetic ? h.crowd_level : null,
     emergencyAvailable: h.emergency_available === 1 ? true : (h.emergency_available === 0 ? false : null),
     departments: JSON.parse(h.departments_json || '[]'),
@@ -71,7 +71,7 @@ router.get('/', (req, res) => {
  * GET /api/hospitals/:id
  * Public detailed hospital profile with capacity, departments, and affiliated doctors
  */
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   const hospitalId = parseInt(req.params.id, 10);
   if (isNaN(hospitalId)) {
     return res.status(400).json({
@@ -81,7 +81,7 @@ router.get('/:id', (req, res) => {
     });
   }
 
-  const h = db.get(
+  const h = await db.get(
     `SELECT 
        h.id, h.name, h.address, h.city, h.state, h.phone, h.website_url,
        h.operating_hours_json, h.crowd_level, h.emergency_available,
@@ -100,9 +100,9 @@ router.get('/:id', (req, res) => {
     });
   }
 
-  const affiliatedDoctors = db.all(
+  const affiliatedDoctors = await db.all(
     `SELECT 
-       d.id, d.full_name, d.specialty, d.rating, d.experience_years,
+       d.id, d.full_name, d.specialty, d.rating, d.reviews_count, d.experience_years,
        d.is_verified, d.verification_status, d.is_synthetic, d.provenance_status,
        dha.role_at_facility, dha.distance_text, dha.is_primary
      FROM doctor_hospital_affiliations dha
@@ -120,7 +120,7 @@ router.get('/:id', (req, res) => {
     state: h.state,
     phone: h.phone || null,
     websiteUrl: h.website_url || null,
-    operatingHours: JSON.parse(h.operating_hours_json || '{"regular":"08:00 - 20:00","emergency":"24/7"}'),
+    operatingHours: JSON.parse(h.operating_hours_json || '{}'),
     crowdLevel: h.is_synthetic ? h.crowd_level : null,
     emergencyAvailable: h.emergency_available === 1 ? true : (h.emergency_available === 0 ? false : null),
     departments: JSON.parse(h.departments_json || '[]'),
@@ -135,7 +135,7 @@ router.get('/:id', (req, res) => {
       id: doc.id,
       name: doc.full_name,
       specialty: doc.specialty,
-      rating: doc.rating,
+      rating: doc.is_synthetic || doc.reviews_count > 0 ? doc.rating : null,
       experience: doc.experience_years,
       roleAtFacility: doc.role_at_facility,
       distance: doc.distance_text,

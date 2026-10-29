@@ -3,7 +3,7 @@
  * and automatic JWT Authorization header injection.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 export async function apiRequest(endpoint, options = {}) {
   const token = localStorage.getItem('cares_auth_token');
@@ -22,7 +22,14 @@ export async function apiRequest(endpoint, options = {}) {
       headers,
     });
 
-    const data = await response.json().catch(() => ({}));
+    let data;
+    try { data=await response.json(); } catch {
+      if (response.ok) {
+        const invalid=new Error('The API returned an invalid response. Check service routing and try again.');
+        invalid.code='INVALID_API_RESPONSE';throw invalid;
+      }
+      data={};
+    }
 
     if (!response.ok) {
       const error = new Error(data.error || `HTTP error! Status: ${response.status}`);

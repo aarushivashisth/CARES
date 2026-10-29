@@ -13,6 +13,9 @@ import hospitalRoutes from './routes/hospitalRoutes.js';
 import publicHospitalRoutes from './routes/publicHospitalRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 
+import aiRoutes from './routes/aiRoutes.js';
+import homeCareRoutes from './routes/homeCareRoutes.js';
+
 const app = express();
 
 // Configure trust proxy setting from environment (e.g. when behind TLS-terminator)
@@ -51,9 +54,7 @@ app.use(
       // Match configured client origin or local development ports
       const allowedOrigins = [
         config.clientOrigin,
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-        'http://localhost:3000'
+        ...(config.nodeEnv !== 'production' ? ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'] : [])
       ];
 
       if (allowedOrigins.includes(origin)) {
@@ -71,6 +72,9 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+// Authenticated responses and sensitive request details must not enter shared caches.
+app.use((req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
+
 // Logging middleware in development
 if (config.nodeEnv !== 'test') {
   app.use(morgan('dev'));
@@ -87,6 +91,8 @@ app.get('/', (req, res) => {
 });
 
 // Mount modular API routes
+app.use('/api/ai', aiRoutes);
+app.use('/api/home-care', homeCareRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/doctors', doctorRoutes);

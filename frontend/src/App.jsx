@@ -1,3 +1,7 @@
+import DoctorApplicationStatus from './pages/DoctorApplicationStatus.jsx';
+import CareNavigator from './pages/CareNavigator.jsx';
+import DoctorApplication from './pages/DoctorApplication.jsx';
+import HomeCare from './pages/HomeCare.jsx';
 
 import './App.css'
 import { Routes, Route, Link } from 'react-router-dom'
@@ -320,16 +324,16 @@ function HomePage() {
             </p>
 
             <div className="homecare-points">
-              <span>✓ Qualified professionals</span>
-              <span>✓ Clear visit information</span>
+              <span>Service enquiries for review</span>
+              <span>Availability confirmed separately</span>
             </div>
 
-            <a
-              href="#homecare-options"
+            <Link
+              to="/home-care"
               className="primary-button"
             >
               Discover care at home <span>→</span>
-            </a>
+            </Link>
 
             <div
               className="homecare-options"
@@ -474,6 +478,10 @@ function App() {
   return (
     <AuthProvider>
       <Routes>
+        <Route path="/doctor/application" element={<ProtectedRoute allowedRoles={['doctor']}><SiteLayout><DoctorApplicationStatus /></SiteLayout></ProtectedRoute>} />
+        <Route path="/navigator" element={<SiteLayout><CareNavigator /></SiteLayout>} />
+        <Route path="/apply-doctor" element={<SiteLayout><DoctorApplication /></SiteLayout>} />
+        <Route path="/home-care" element={<SiteLayout><HomeCare /></SiteLayout>} />
         <Route
           path="/"
           element={

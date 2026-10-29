@@ -1,0 +1,26 @@
+{
+  "measuredAt": "2026-10-29T08:30:53.406Z",
+  "node": "v24.22.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "syntheticInput": "Find a cardiologist",
+  "warm": {
+    "iterations": 1000,
+    "medianMs": 0.00195799999999835,
+    "p95Ms": 0.005917000000000172
+  },
+  "coldProcess": {
+    "iterations": 5,
+    "medianMs": 30.375249999999994,
+    "minMs": 28.188249999999982,
+    "maxMs": 32.870083
+  },
+  "memory": {
+    "rss": 54870016,
+    "heapTotal": 8224768,
+    "heapUsed": 5190472,
+    "external": 2296530,
+    "arrayBuffers": 137523
+  },
+  "scope": "Local process only. Warm includes guards, vectorization and inference. Cold includes Node process creation/import. No HTTP, PostgreSQL, Vercel or LLM measurements."
+}

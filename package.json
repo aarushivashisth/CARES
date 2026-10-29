@@ -22,5 +22,9 @@
     "capstone"
   ],
   "author": "CARES Team",
-  "license": "ISC"
+  "license": "ISC",
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  }
 }

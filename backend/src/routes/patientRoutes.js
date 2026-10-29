@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import { db } from '../db/connection.js';
+import { Router } from '../middleware/asyncRouter.js';
+import { db } from '../db/database.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { validateBody } from '../middleware/validateMiddleware.js';
@@ -66,8 +66,8 @@ function getBookingHorizonDateString(days = 90) {
 /**
  * Shared query snippet to fetch patient appointments with full context
  */
-function getPatientAppointments(patientId) {
-  return db.all(
+async function getPatientAppointments(patientId) {
+  return await db.all(
     `SELECT
        a.id, a.patient_id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.is_demo_request, a.created_at, a.updated_at,
        d.id AS doctor_id, d.full_name AS doctor_name, d.specialty AS doctor_specialty,
@@ -90,8 +90,8 @@ function getPatientAppointments(patientId) {
  * GET /api/patient/dashboard
  * Patient portal data summary with strict patient isolation
  */
-router.get('/dashboard', (req, res) => {
-  const patientProfile = db.get(
+router.get('/dashboard', async (req, res) => {
+  const patientProfile = await db.get(
     `SELECT * FROM patient_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -105,7 +105,7 @@ router.get('/dashboard', (req, res) => {
   }
 
   // Strict Isolation: Get ONLY appointments for this authenticated patient
-  const appointments = getPatientAppointments(patientProfile.id);
+  const appointments = await getPatientAppointments(patientProfile.id);
 
   const pendingCount = appointments.filter(
     (a) => a.status === 'pending' || a.status === 'requested'
@@ -137,8 +137,8 @@ router.get('/dashboard', (req, res) => {
  * GET /api/patient/profile
  * Returns authenticated patient's profile
  */
-router.get('/profile', (req, res) => {
-  const patientProfile = db.get(
+router.get('/profile', async (req, res) => {
+  const patientProfile = await db.get(
     `SELECT id, user_id, full_name, phone, date_of_birth, gender, emergency_contact, city, is_synthetic, created_at, updated_at
      FROM patient_profiles WHERE user_id = ?`,
     [req.user.id]
@@ -164,8 +164,8 @@ router.get('/profile', (req, res) => {
  * Rejects protected/unknown fields, validates formats, updates atomically,
  * and records PATIENT_PROFILE_UPDATED audit log.
  */
-router.put('/profile', (req, res) => {
-  const patientProfile = db.get(
+router.put('/profile', async (req, res) => {
+  const patientProfile = await db.get(
     `SELECT * FROM patient_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -378,8 +378,8 @@ router.put('/profile', (req, res) => {
   }
 
   // Atomic update and audit logging
-  db.transaction((tx) => {
-    tx.run(
+  await db.transaction(async (tx) => {
+    await tx.run(
       `UPDATE patient_profiles
        SET full_name = ?,
            phone = ?,
@@ -392,7 +392,7 @@ router.put('/profile', (req, res) => {
       [newFullName, newPhone, newGender, newDob, newEmergencyContact, newCity, patientProfile.id]
     );
 
-    tx.run(
+    await tx.run(
       `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
        VALUES (?, 'PATIENT_PROFILE_UPDATED', 'PATIENT_PROFILE', ?, ?, ?)`,
       [
@@ -411,7 +411,7 @@ router.put('/profile', (req, res) => {
     );
   });
 
-  const updatedProfile = db.get(
+  const updatedProfile = await db.get(
     `SELECT id, user_id, full_name, phone, date_of_birth, gender, emergency_contact, city, is_synthetic, created_at, updated_at
      FROM patient_profiles WHERE id = ?`,
     [patientProfile.id]
@@ -428,8 +428,8 @@ router.put('/profile', (req, res) => {
  * GET /api/patient/appointments
  * Dedicated endpoint returning list of appointments for authenticated patient
  */
-router.get('/appointments', (req, res) => {
-  const patientProfile = db.get(
+router.get('/appointments', async (req, res) => {
+  const patientProfile = await db.get(
     `SELECT id FROM patient_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -442,7 +442,7 @@ router.get('/appointments', (req, res) => {
     });
   }
 
-  const appointments = getPatientAppointments(patientProfile.id);
+  const appointments = await getPatientAppointments(patientProfile.id);
 
   res.status(200).json({
     success: true,
@@ -463,11 +463,11 @@ router.post(
     doctor_id: { required: true },
     preferred_slot: { required: true, minLength: 2 },
   }),
-  (req, res) => {
+  async (req, res) => {
     const { doctor_id, hospital_id, preferred_slot, requested_date, visit_type, reason_for_visit } = req.body;
 
     // 1. Strictly derive patient from auth context (never trust client payload)
-    const patientProfile = db.get(
+    const patientProfile = await db.get(
       `SELECT id, full_name FROM patient_profiles WHERE user_id = ?`,
       [req.user.id]
     );
@@ -490,7 +490,7 @@ router.post(
       });
     }
 
-    const doctor = db.get(
+    const doctor = await db.get(
       `SELECT id, full_name, is_accepting_new_patients, available_slots_json FROM doctor_profiles WHERE id = ?`,
       [parsedDoctorId]
     );
@@ -586,7 +586,7 @@ router.post(
     if (hospital_id) {
       const parsedHospitalId = parseInt(hospital_id, 10);
       if (!isNaN(parsedHospitalId)) {
-        const affiliation = db.get(
+        const affiliation = await db.get(
           `SELECT hospital_id FROM doctor_hospital_affiliations WHERE doctor_id = ? AND hospital_id = ?`,
           [doctor.id, parsedHospitalId]
         );
@@ -597,7 +597,7 @@ router.post(
     }
 
     if (!resolvedHospitalId) {
-      const primaryAffiliation = db.get(
+      const primaryAffiliation = await db.get(
         `SELECT hospital_id FROM doctor_hospital_affiliations WHERE doctor_id = ? ORDER BY is_primary DESC, id ASC LIMIT 1`,
         [doctor.id]
       );
@@ -607,7 +607,7 @@ router.post(
     }
 
     // 6. Collision Prevention: Reject if another patient already has this slot accepted/confirmed
-    const existingAccepted = db.get(
+    const existingAccepted = await db.get(
       `SELECT id FROM appointment_requests
        WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
        AND status IN ('accepted', 'confirmed')`,
@@ -623,7 +623,7 @@ router.post(
     }
 
     // 7. Prevent duplicate rapid submissions (within 30 seconds for same slot, date, and doctor by same patient)
-    const recentDuplicate = db.get(
+    const recentDuplicate = await db.get(
       `SELECT id FROM appointment_requests 
        WHERE patient_id = ? AND doctor_id = ? AND requested_date = ? AND preferred_slot = ? AND status = 'pending'
        AND datetime(created_at, '+30 seconds') > datetime('now')`,
@@ -641,9 +641,9 @@ router.post(
     // 8. Atomic Transaction: Insert request and status history with initial status 'pending'
     let newAppointmentId;
     try {
-      newAppointmentId = db.transaction((tx) => {
+      newAppointmentId = await db.transaction(async (tx) => {
         // Double check conflict inside transaction to avoid race conditions
-        const inTxConflict = tx.get(
+        const inTxConflict = await tx.get(
           `SELECT id FROM appointment_requests
            WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
            AND status IN ('accepted', 'confirmed')`,
@@ -655,7 +655,7 @@ router.post(
           throw conflictErr;
         }
 
-        const result = tx.run(
+        const result = await tx.run(
           `INSERT INTO appointment_requests (
             patient_id, doctor_id, hospital_id, requested_date, preferred_slot, visit_type, reason_for_visit, status, is_demo_request
           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 1)`,
@@ -672,13 +672,13 @@ router.post(
 
         const apptId = result.lastInsertRowid;
 
-        tx.run(
+        await tx.run(
           `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
            VALUES (?, 'pending', 'Appointment requested by patient', ?)`,
           [apptId, req.user.id]
         );
 
-        tx.run(
+        await tx.run(
           `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
            VALUES (?, 'APPOINTMENT_REQUEST_CREATED', 'APPOINTMENT', ?, ?, ?)`,
           [
@@ -730,7 +730,7 @@ router.post(
  * Handler for patient cancelling an appointment
  * Validates patient ownership and cancellable state
  */
-function handlePatientCancel(req, res) {
+async function handlePatientCancel(req, res) {
   const appointmentId = parseInt(req.params.id, 10);
   if (isNaN(appointmentId)) {
     return res.status(400).json({
@@ -740,7 +740,7 @@ function handlePatientCancel(req, res) {
     });
   }
 
-  const patientProfile = db.get(
+  const patientProfile = await db.get(
     `SELECT id FROM patient_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -753,7 +753,7 @@ function handlePatientCancel(req, res) {
     });
   }
 
-  const appointment = db.get(
+  const appointment = await db.get(
     `SELECT * FROM appointment_requests WHERE id = ?`,
     [appointmentId]
   );
@@ -807,24 +807,28 @@ function handlePatientCancel(req, res) {
     }
   }
 
+  for (const field of ['notes','reason']) {
+    if (req.body?.[field] !== undefined && (typeof req.body[field] !== 'string' || req.body[field].length > 500)) return res.status(400).json({success:false,error:'Cancellation notes must be text of at most 500 characters.',code:'INVALID_NOTES'});
+  }
   const cancelReason = req.body?.notes?.trim() || req.body?.reason?.trim() ||
     (appointment.requested_date === todayStr
       ? 'Same-day cancellation by patient'
       : 'Appointment cancelled by patient');
 
-  db.transaction((tx) => {
-    tx.run(
-      `UPDATE appointment_requests SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`,
-      [appointmentId]
+  await db.transaction(async (tx) => {
+    const transition = await tx.run(
+      `UPDATE appointment_requests SET status = 'cancelled', updated_at = datetime('now') WHERE id = ? AND status = ?`,
+      [appointmentId, appointment.status]
     );
+    if (!transition.changes) throw Object.assign(new Error('Appointment changed; refresh before trying again.'), {status:409,code:'STALE_APPOINTMENT'});
 
-    tx.run(
+    await tx.run(
       `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
        VALUES (?, 'cancelled', ?, ?)`,
       [appointmentId, cancelReason, req.user.id]
     );
 
-    tx.run(
+    await tx.run(
       `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
        VALUES (?, 'PATIENT_APPOINTMENT_CANCELLED', 'APPOINTMENT', ?, ?, ?)`,
       [
@@ -836,7 +840,7 @@ function handlePatientCancel(req, res) {
     );
   });
 
-  const updated = db.get(`SELECT * FROM appointment_requests WHERE id = ?`, [appointmentId]);
+  const updated = await db.get(`SELECT * FROM appointment_requests WHERE id = ?`, [appointmentId]);
 
   res.status(200).json({
     success: true,

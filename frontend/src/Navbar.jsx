@@ -10,7 +10,7 @@ export default function Navbar() {
     if (!user) return '/login';
     switch (user.role) {
       case 'patient': return '/patient/dashboard';
-      case 'doctor': return '/doctor/dashboard';
+      case 'doctor': return user.status === 'pending_approval' ? '/doctor/application' : '/doctor/dashboard';
       case 'hospital': return '/hospital/dashboard';
       case 'admin': return '/admin/dashboard';
       default: return '/login';
@@ -45,7 +45,8 @@ export default function Navbar() {
         >
           Hospitals
         </Link>
-        <Link to="/#home-care">Care at home</Link>
+        <Link to="/home-care">Care at home</Link>
+        <Link to="/navigator">Care Navigator</Link>
         <Link
           className={pathname === '/emergency' ? 'active' : ''}
           to="/emergency"

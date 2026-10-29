@@ -1,0 +1,152 @@
+[
+  {
+    "text": "Which providers practice cardiovascular medicine",
+    "probabilities": [
+      0.20565061728978287,
+      0.15945011416276814,
+      0.3076932614893733,
+      0.1603218093804914,
+      0.16688419767758425
+    ]
+  },
+  {
+    "text": "Need a heart doctor for a scheduled review",
+    "probabilities": [
+      0.2903128397528755,
+      0.17124743531494513,
+      0.1774372160600269,
+      0.18598796906940424,
+      0.17501453980274834
+    ]
+  },
+  {
+    "text": "Help with finding cardiac consultants",
+    "probabilities": [
+      0.2635316715502835,
+      0.18724119077971615,
+      0.16364302955621138,
+      0.18895495251802774,
+      0.19662915559576125
+    ]
+  },
+  {
+    "text": "Which providers practice skin medicine",
+    "probabilities": [
+      0.13680137175449814,
+      0.2993161794400005,
+      0.2908067573748738,
+      0.13346944082134823,
+      0.1396062506092794
+    ]
+  },
+  {
+    "text": "Need a skin doctor for a scheduled review",
+    "probabilities": [
+      0.17045108976605894,
+      0.3052278488199362,
+      0.17324819023076746,
+      0.1811158619319178,
+      0.16995700925131962
+    ]
+  },
+  {
+    "text": "Help with finding dermatological consultants",
+    "probabilities": [
+      0.20884568526660563,
+      0.20274680053775532,
+      0.17021732123166103,
+      0.20482830081393,
+      0.213361892150048
+    ]
+  },
+  {
+    "text": "Which providers practice primary care medicine",
+    "probabilities": [
+      0.1565890501953429,
+      0.15182449333811096,
+      0.40702540812026317,
+      0.1389700116754706,
+      0.14559103667081236
+    ]
+  },
+  {
+    "text": "Need a family doctor for a scheduled review",
+    "probabilities": [
+      0.18579149406808668,
+      0.18147865712188732,
+      0.2519449811607998,
+      0.19584141491901239,
+      0.18494345273021387
+    ]
+  },
+  {
+    "text": "Help with finding general medical consultants",
+    "probabilities": [
+      0.17606960293517682,
+      0.17132814095800836,
+      0.29989625389777613,
+      0.1731404010605161,
+      0.17956560114852266
+    ]
+  },
+  {
+    "text": "Which providers practice orthopedic medicine",
+    "probabilities": [
+      0.14612650440202504,
+      0.1417372778251094,
+      0.3027695379619733,
+      0.2611043541712301,
+      0.14826232563966207
+    ]
+  },
+  {
+    "text": "Need a joint doctor for a scheduled review",
+    "probabilities": [
+      0.18834578777434732,
+      0.18330206839508803,
+      0.1897587009667263,
+      0.25118466438099346,
+      0.1874087784828448
+    ]
+  },
+  {
+    "text": "Help with finding musculoskeletal consultants",
+    "probabilities": [
+      0.20884568526660563,
+      0.20274680053775532,
+      0.17021732123166103,
+      0.20482830081393,
+      0.213361892150048
+    ]
+  },
+  {
+    "text": "Which providers practice pediatric medicine",
+    "probabilities": [
+      0.14551215426175454,
+      0.14113260492647842,
+      0.2950574145950136,
+      0.1414296142191635,
+      0.2768682119975898
+    ]
+  },
+  {
+    "text": "Need a children's doctor for a scheduled review",
+    "probabilities": [
+      0.1913655808025441,
+      0.18693024719120563,
+      0.19246965846343048,
+      0.20167083265383368,
+      0.22756368088898596
+    ]
+  },
+  {
+    "text": "Help with finding paediatric consultants",
+    "probabilities": [
+      0.20884568526660563,
+      0.20274680053775532,
+      0.17021732123166103,
+      0.20482830081393,
+      0.213361892150048
+    ]
+  }
+]

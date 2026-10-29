@@ -45,3 +45,16 @@ pnpm-debug.log*
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Disposable QA and Python environments
+frontend/test-results/
+frontend/playwright-report/
+.venv/
+__pycache__/
+*.pyc
+# Defense in depth for accidental database copies outside backend/data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3

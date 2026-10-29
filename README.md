@@ -1,42 +1,28 @@
 # CARES — Healthcare Navigation & Appointment Platform
 
-CARES is an integrated full-stack healthcare coordination platform designed to empower patients, healthcare providers, institutional facilities, and health system administrators. It combines verified doctor discovery, institutional facility directories, real-time appointment booking and lifecycle coordination, provider credentialing workflows, and administrative audit trails.
+CARES is an integrated full-stack healthcare coordination platform designed to empower patients, healthcare providers, institutional facilities, and health system administrators. It combines verified doctor discovery, institutional facility directories, appointment requests and lifecycle coordination, provider credentialing workflows, and administrative audit trails.
 
 ---
 
-## 1. Architecture & Technology Stack
+## 1. Architecture & current status
 
-```
-                          ┌────────────────────────────┐
-                          │   React 19 / Vite Client   │
-                          │   (Vanilla CSS, SPA Router)│
-                          └─────────────┬──────────────┘
-                                        │ HTTP / JSON (REST)
-                                        │ JWT Bearer Auth
-                                        ▼
-                          ┌────────────────────────────┐
-                          │     Node.js / Express      │
-                          │   REST API & Security Core │
-                          └─────────────┬──────────────┘
-                                        │ Database Driver
-                                        ▼
-                          ┌────────────────────────────┐
-                          │    SQLite Database Engine  │
-                          │   (cares.db / test.db)     │
-                          └────────────────────────────┘
-```
+React/Vite frontend and one Express Node 24 function target Vercel, with managed PostgreSQL (Neon pooled TLS recommended). Local SQLite development remains supported with an explicitly selected disposable file. No protected live database has been opened or migrated. No deployment has been performed.
 
-- **Frontend (`frontend/`):** React 19, Vite, React Router v7, Context API for authentication state, Vanilla CSS design system.
-- **Backend (`backend/`):** Node.js 18+, Express 4, JSON Web Token (JWT) authentication, bcryptjs password hashing, Morgan logging.
-- **Security Middleware:** Native HTTP defense-in-depth headers (CSP, HSTS, frame protections), token-bucket authentication rate limiting, role-based access control (RBAC).
-- **Data Persistence:** SQLite 3 with transactional state machines, foreign-key constraints, and audit logging.
-- **Testing:** Node.js native test runner (`node:test`) for backend integration; Vitest + React Testing Library + JSDOM for frontend components.
+Implemented additions: persistent Care at Home enquiries and administrator review; source-qualified emergency contacts and unknown hours; doctor application/clarification sessions; real trained specialty-intent prototype; local vector retrieval with a real backend Anthropic integration; controlled directory/private appointment lookups; async PostgreSQL adapter, versioned migrations and shared rate limits.
 
----
+**Release gates:** managed PostgreSQL network/restore validation, owner-approved Vercel preview, real LLM credentials/budget and live answer-quality evaluation. CareMatch uses 80 synthetic explicit-intent examples, not clinically validated symptom mapping. Home-care enquiries are not confirmed bookings.
+
+- [Architecture and diagrams](docs/ARCHITECTURE.md)
+- [Implementation tracker and gap matrix](docs/IMPLEMENTATION_TRACKER.md)
+- [Executed test evidence](docs/TEST_EVIDENCE.md)
+- [ML/RAG methods and actual results](docs/AI_EVALUATION.md)
+- [Deployment and recovery guide](docs/DEPLOYMENT_GUIDE.md)
+- [Capstone report](docs/CAPSTONE_REPORT.md)
+- [Owner actions](MANUAL_ACTIONS_REQUIRED.md)
 
 ## 2. Prerequisites
 
-- **Node.js:** v18.17.0 or higher (v20+ recommended).
+- **Node.js:** v24.x (required; includes the local node:sqlite runtime).
 - **npm:** v9.0.0 or higher.
 - **Operating System:** Windows, macOS, or Linux.
 - **SQLite:** Embedded SQLite runtime (no external database server installation required).
@@ -61,7 +47,7 @@ Copy the provided safe environment templates. **Never commit real `.env` files t
 
 ```bash
 # Root template
-cp .env.example .env
+# Root .env is not loaded; use the backend template below
 
 # Backend template
 cp backend/.env.example backend/.env
@@ -101,10 +87,14 @@ npm run start:frontend
 | `NODE_ENV` | Backend | **Yes** | `development`, `production`, or `test` |
 | `JWT_SECRET` | Backend | **Yes** | Signing key. **In production, server strictly refuses to start if missing, blank, fallback, or <32 characters.** |
 | `JWT_EXPIRES_IN`| Backend | No | Token lifetime (default: `7d`) |
-| `DATABASE_PATH` | Backend | No | SQLite file location (default: `./data/cares.db`) |
-| `TRUST_PROXY` | Backend | Contextual | Reverse proxy trust (`1`, `true`, or proxy IP). Required when behind TLS-terminator. |
+| `DATABASE_PATH` | Local backend | No | Explicit new disposable SQLite file; protected default access is refused |
+| `DATABASE_URL` | Backend/Vercel | **Yes** | Durable pooled PostgreSQL URL; production TLS uses sslmode=verify-full |
+| `LLM_PROVIDER` | Backend only | For generation | `gemini` for the free-tier demo; `anthropic` remains supported |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Backend only | Key **secret**, model public | Gemini configuration; never expose in Vite |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Backend only | Optional alternative | Existing Anthropic configuration; never expose in Vite |
+| `TRUST_PROXY` | Backend | Contextual | Reverse proxy trust (bounded hop count such as `1`; production rejects blanket `true`). Required when behind TLS-terminator. |
 | `CLIENT_ORIGIN` | Backend | No | Allowed frontend origin for CORS (default: `http://localhost:5173`) |
-| `VITE_API_URL` | Frontend| No | Backend API endpoint URL (default: `http://localhost:5000/api`) |
+| `VITE_API_URL` | Frontend | No | Public base URL, default `/api`; never put secrets here |
 
 ---
 
@@ -138,26 +128,26 @@ npm run build
 
 | Command | Safety Classification | Description |
 | :--- | :--- | :--- |
-| `npm test` | **SAFE** | Executes against isolated `backend/data/cares.test.db`. Strict path guard blocks live DB access. |
+| `npm test` | **SAFE** | Creates a new temporary SQLite database and a disposable PostgreSQL engine; no existing test database is reused. |
 | `npm run lint` | **SAFE** | Read-only static analysis on source files. |
-| `npm run build` | **SAFE** | Read-only bundle generation into `frontend/dist/`. |
-| `npm run start:*` | **SAFE** | Runs services with existing database records. |
+| `npm run build` | **BUILD OUTPUT** | Generates ignored production files in `frontend/dist/`. |
+| `npm run start:*` | **DATABASE ACCESS** | Local startup initializes schema; use an explicitly selected disposable file. Protected access is refused by default. |
 | `npm run db:init` | **DESTRUCTIVE** | **DO NOT RUN against existing copy.** Creates or resets tables. |
-| `npm run db:seed` | **DESTRUCTIVE** | **DO NOT RUN against existing copy.** Wipes and reseeds synthetic records. |
+| `npm run db:seed` | **DESTRUCTIVE** | **DO NOT RUN against existing copy.** Creates synthetic records only in a new file; refuses existing nonempty databases. |
 | `node src/scripts/importLocalProviders.js` | **DATABASE MUTATION** | Provider import pipeline. |
 
 ---
 
 ## 8. Demo Roles & Verified Accounts
 
-The application includes the following pre-configured demo accounts:
+The isolated synthetic demo fixture creates the following fictional accounts. They are never production bootstrap accounts or evidence of real credentials:
 
 | Role | Email | Password | Entity / Person Represented | Status / Access |
 | :--- | :--- | :--- | :--- | :--- |
 | **System Administrator** | `admin@cares.org` | `Admin@12345` | Platform Governance | Full audit logs, credential verification queue |
 | **Patient** | `patient@cares.org` | `Patient@12345` | Ananya Sharma | Profile editing, appointment booking & cancellation |
-| **Verified Doctor** | `dr.maya@cares.org` | `Doctor@12345` | Dr. Maya Bennett (Primary Care) | Practice settings, schedule availability, appointment triage |
-| **Pending Doctor** | `dr.daniel@cares.org` | `Doctor@12345` | Dr. Daniel Park (Cardiology) | Unverified profile, verification application submission |
+| **Synthetic Doctor** | `dr.maya@cares.org` | `Doctor@12345` | Dr. Maya Bennett (Primary Care) | Practice settings, schedule availability, appointment triage |
+| **Synthetic Doctor** | `dr.daniel@cares.org` | `Doctor@12345` | Dr. Daniel Park (Cardiology) | Synthetic verification flags and appointment workflow |
 | **Hospital Manager** | `hospital@riverside.org` | `Hospital@12345` | Riverside Community Health Center | Facility profile editing, clinician roster affiliation |
 
 ---
@@ -209,30 +199,48 @@ The application includes the following pre-configured demo accounts:
    - Review platform metrics (registered users by role, verification queue size).
    - Review **Credential Verification Queue**: review submissions, request clarification, or approve credentials.
    - Notice self-approval prohibition if an admin's own record appears.
-   - Review the immutable **Administrative & Security Audit Trail** recording all availability changes, status updates, and credential decisions.
+   - Review the recorded **Administrative & Security Audit Trail** recording all availability changes, status updates, and credential decisions.
 
 ---
 
-## 10. Known Limitations & Manual Verification Items
+## 10. Known limitations and owner gates
 
-- **Single-Node Rate Limiter:** The in-memory token bucket rate limiter is scoped per process. If deploying to multi-instance container clusters behind a load balancer, a distributed cache (e.g., Redis) should be introduced.
-- **Browser Automation Suite:** Automated tests run via Node.js native runner and Vitest JSDOM. Full browser layout rendering, screen reader speech output, and CSS media queries should be verified manually in target browsers.
-- **Telemetry Feeds:** Live hospital bed counts and queue wait times are displayed as `Unavailable` per CARES truth policy, pending live hospital IoT integrations.
+- Managed PostgreSQL TLS/pooling, distributed rate limits, backup/restore and actual Vercel routing require owner-approved staging verification.
+- LLM credentials and billing approval are unavailable; live generation, faithfulness, usefulness and cost are unmeasured. Local retrieval and mocked citation contracts are separately tested.
+- CareMatch is a small synthetic explicit-specialty prototype, not a clinically validated symptom classifier.
+- Bearer tokens remain in localStorage for compatibility. Logout clears the browser token; a copied token remains valid until expiration or account suspension.
+- Phone information is sourced, but calls, capacity, ambulances and provider availability are not monitored by CARES.
+- Automated Chromium desktop/mobile checks do not replace independent screen-reader, additional-browser or clinical/privacy review.
 
----
+## 11. Production deployment
 
-## 11. Production Deployment Checklist
+Use the [Vercel/PostgreSQL deployment guide](docs/DEPLOYMENT_GUIDE.md) and [manual checklist](MANUAL_ACTIONS_REQUIRED.md). The function exports Express without a listener, initialization or seeding. SQLite files cannot provide durable storage in Vercel Functions. Create isolated managed databases and apply reviewed versioned SQL explicitly; never point a preview at production.
 
-- [ ] **Secret Configuration:** Generate a cryptographically secure `JWT_SECRET` (minimum 32 characters):
-  ```bash
-  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-  ```
-- [ ] **Environment Mode:** Set `NODE_ENV=production`. Verify startup refuses to boot if `JWT_SECRET` is unset or default.
-- [ ] **Reverse Proxy & TLS:** Place behind Nginx, Caddy, or cloud load balancer terminating TLS. Set `TRUST_PROXY=1` so HSTS and client IP rate limiting function accurately.
-- [ ] **Persistent Storage:** Mount a persistent volume for `backend/data/cares.db`. SQLite requires POSIX filesystem locks; avoid NFS mounts with broken locking.
-- [ ] **Database Backups:** Schedule automated read-only backups using SQLite online backup API or `.backup` CLI:
-  ```bash
-  sqlite3 backend/data/cares.db ".backup 'backend/data/backup_$(date +%Y%m%d).db'"
-  ```
-- [ ] **Frontend Production Build:** Compile assets with `npm run build` and serve static files via Nginx or CDN with long-lived caching on hashed assets.
-- [ ] **CORS Configuration:** Restrict `CLIENT_ORIGIN` to the exact production domain.
+Do not commit, push, deploy publicly, create billable services or transfer existing records without owner approval. No existing records are imported by setup or migration commands. A schema-only dry-run plan is in `docs/DATA_MIGRATION_DRY_RUN.json`.
+
+## 12. Safe isolated demonstration and AI reproduction
+
+```sh
+npm run build
+node backend/src/scripts/startIsolatedDemo.js
+# Open http://127.0.0.1:4173; Ctrl-C cleans the newly created synthetic database.
+```
+
+The fixture uses labeled synthetic seed accounts, suitable only for local evaluation. Do not expose it publicly. Alternatively, copy `backend/.env.example` privately, choose a newly named `DATABASE_PATH`, seed that new file once if desired, and start the local backend/frontend. The backend loads `backend/.env`; root `.env` is not auto-loaded. Vite proxies `/api` locally.
+
+```sh
+npm --prefix frontend exec playwright install chromium
+npm --prefix frontend run test:e2e
+npm --prefix backend run knowledge:build
+npm --prefix backend run evaluate:ai
+```
+
+For offline training, create a Python virtual environment, install `ml/requirements.txt`, then run `python ml/train.py`. This exports the trained Node JSON model and actual evaluation/parity files. Current held-out macro-F1: logistic regression 0.667619, two-layer MLP 0.670000, on only 15 synthetic examples. See the evaluation document for class metrics, confusion matrix, limitations and latency scope.
+
+For the Gemini demo, privately configure `LLM_PROVIDER=gemini`, `GEMINI_API_KEY` and `GEMINI_MODEL=gemini-3.5-flash-lite` in `backend/.env`. The existing Anthropic path remains available with `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`. Without the selected provider key/model the Navigator reports unavailability. Retrieval and structured lookups still operate. Do not present mocked provider tests as real generation. The owner-run live evaluation command is `node backend/src/scripts/evaluateLiveNavigator.js --authorize-live-evaluation`; it requires explicit live-evaluation authorization and private configuration, plus budget approval for any paid account, and saves unscored human-review fields. It has not been executed here.
+
+## Gemini free-tier configuration update
+
+Gemini transport is implemented with header-only key authentication, 15-second timeout, bounded JSON Schema output, the existing source/citation validator and no automatic cross-provider fallback. The recommended demo model is listed with free-tier input/output on [Google pricing](https://ai.google.dev/gemini-api/docs/pricing), checked 2026-10-29; account eligibility and quotas still control actual access/cost. Do not enable paid billing for a free-only demo. Use synthetic non-sensitive service questions because free-tier content may be used to improve Google products.
+
+The owner reported creating a Gemini key. No `backend/.env` or configured Gemini key was present during the local setup check, so no live provider request was made. Copy `backend/.env.example` to `backend/.env` privately and enter the key there; never put it in chat, frontend variables, Git or screenshots. Restart the backend after configuration.

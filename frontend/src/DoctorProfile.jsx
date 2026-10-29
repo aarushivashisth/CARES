@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./services/apiClient.js";
 import { useAuth } from "./context/useAuth.js";
-import { doctors as fallbackDoctors } from "./doctorData.js";
 import "./DoctorProfile.css";
 
 export default function DoctorProfile() {
@@ -57,17 +56,7 @@ export default function DoctorProfile() {
           if (err.status === 404 || err.code === "DOCTOR_NOT_FOUND") {
             setNotFound(true);
           } else {
-            console.warn("Backend error fetching doctor profile, checking fallback:", err);
-            // Check fallback doctors for offline continuity
-            const fallback = fallbackDoctors.find((item) => String(item.id) === String(id));
-            if (fallback) {
-              setDoctor(fallback);
-              if (fallback.slots && fallback.slots.length > 0) {
-                setSelectedSlot((prev) => prev || fallback.slots[0]);
-              }
-            } else {
-              setError(err.message || "Failed to load doctor profile.");
-            }
+            setError(err.message || "Failed to load doctor profile.");
           }
         }
       } finally {
@@ -216,7 +205,7 @@ export default function DoctorProfile() {
             </p>
           )}
           <p className="profile-rating">
-            ★ {doctor.rating || "5.0"} · {doctor.reviews || 0} reviews · Registration: {doctor.licenseNumber || "N/A"}
+            {doctor.rating != null ? `★ ${doctor.rating} · ${doctor.reviews || 0} reviews` : "Rating not recorded"} · Registration: {doctor.licenseNumber || "N/A"}
             {doctor.issuingCouncil ? ` (${doctor.issuingCouncil})` : ""}
           </p>
           <span className="profile-status">
@@ -319,7 +308,7 @@ export default function DoctorProfile() {
               </div>
             </div>
             <p style={{ margin: "8px 0 0", fontSize: "11px", color: "#64748b" }}>
-              CARES adheres to healthcare data integrity. Synthetic prototype records are clearly marked. Real provider records are validated against state medical councils.
+              CARES adheres to healthcare data integrity. Synthetic prototype records are clearly marked. Public sourcing does not imply credential verification. Check the recorded verification state and source.
             </p>
           </article>
         </section>

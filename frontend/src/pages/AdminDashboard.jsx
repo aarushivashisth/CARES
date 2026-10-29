@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/useAuth.js';
 import { api } from '../services/apiClient.js';
@@ -135,6 +136,7 @@ export default function AdminDashboard() {
         <div className="dashboard-title-wrap">
           <p className="dashboard-eyebrow">SYSTEM & VERIFICATION GOVERNANCE</p>
           <h1>Platform Administration</h1>
+          <p><Link to="/home-care">Care at Home — review service enquiries</Link></p>
           <p className="dashboard-user-meta">
             Officer Session: <strong>{user?.email}</strong> · Role: Administrator
           </p>
@@ -494,6 +496,7 @@ export default function AdminDashboard() {
                     Clarification Inquiries for Applicant *
                   </label>
                   <textarea
+                    aria-label="Clarification Inquiries for Applicant"
                     rows={3}
                     value={modalInput}
                     onChange={(e) => setModalInput(e.target.value)}
@@ -509,6 +512,7 @@ export default function AdminDashboard() {
                   Administrative Note / Justification *
                 </label>
                 <textarea
+                  aria-label="Administrative Note / Justification"
                   rows={2}
                   value={modalReason}
                   onChange={(e) => setModalReason(e.target.value)}

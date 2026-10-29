@@ -17,7 +17,7 @@ const backendRoot = path.resolve(__dirname, '../../');
  */
 export function resolveDatabasePath(dbPath) {
   if (!dbPath || typeof dbPath !== 'string') return '';
-  const trimmed = dbPath.trim();
+  const trimmed = dbPath.trim().replace(/\\/g, '/');
   if (!trimmed) return '';
   return path.isAbsolute(trimmed)
     ? path.resolve(trimmed)
@@ -67,6 +67,7 @@ export function validateJwtSecret(secret, nodeEnv) {
     if (trimmed === DEVELOPMENT_JWT_SECRET || trimmed.includes('development_secret')) {
       throw new Error('FATAL: Insecure development JWT_SECRET cannot be used in production mode.');
     }
+    if (/replace_with|change_me|your_secret|example_secret/i.test(trimmed)) throw new Error('FATAL: Placeholder JWT_SECRET cannot be used in production.');
     if (trimmed.length < 32) {
       throw new Error('FATAL: JWT_SECRET must be at least 32 characters long in production.');
     }
@@ -96,15 +97,32 @@ export function buildConfig(env = process.env) {
 
   return {
     port: parseInt(env.PORT, 10) || 5000,
+    databaseUrl: env.DATABASE_URL || '',
+    allowProtectedDatabase: env.ALLOW_PROTECTED_DATABASE === 'true',
     nodeEnv,
     clientOrigin: env.CLIENT_ORIGIN || 'http://localhost:5173',
     databasePath: env.DATABASE_PATH || (nodeEnv === 'test' ? './data/cares.test.db' : './data/cares.db'),
     jwtSecret,
     jwtExpiresIn: env.JWT_EXPIRES_IN || '7d',
-    trustProxy: env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1'
+    trustProxy: env.TRUST_PROXY === 'true'
       ? true
-      : (nodeEnv === 'test' ? 1 : (env.TRUST_PROXY || false)),
+      : (/^[1-9]$/.test(env.TRUST_PROXY || '') ? Number(env.TRUST_PROXY)
+      : (nodeEnv === 'test' ? 1 : (env.TRUST_PROXY || false))),
   };
+}
+
+export function validateDeployment(cfg) {
+  validateConfig(cfg);
+  let database;
+  try { database = new URL(cfg.databaseUrl); } catch { throw new Error('A valid PostgreSQL DATABASE_URL is required.'); }
+  if (!['postgres:', 'postgresql:'].includes(database.protocol)) throw new Error('A PostgreSQL DATABASE_URL is required.');
+  if (cfg.nodeEnv === 'production') {
+    const origin = new URL(cfg.clientOrigin);
+    if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) throw new Error('CLIENT_ORIGIN must be an exact HTTPS origin.');
+    if (database.searchParams.get('sslmode') !== 'verify-full') throw new Error('Production PostgreSQL must use sslmode=verify-full.');
+    if (cfg.trustProxy === true) throw new Error('Use a bounded TRUST_PROXY hop count, not true.');
+  }
+  return true;
 }
 
 export const config = buildConfig(process.env);

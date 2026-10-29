@@ -1,0 +1,327 @@
+{
+  "dataset_version": "navigation-synthetic-v1",
+  "dataset_sha256": "f7786ea7a932f87edf499e1ebeb9b7409ba3f78b5019d77449152115cd7ea439",
+  "synthetic": true,
+  "size": 80,
+  "class_counts": {
+    "Cardiology": 16,
+    "Dermatology": 16,
+    "General Medicine": 16,
+    "Orthopedics": 16,
+    "Pediatrics": 16
+  },
+  "splits": {
+    "train": {
+      "count": 50,
+      "template_group_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    "validation": {
+      "count": 15,
+      "template_group_ids": [
+        10,
+        11,
+        12
+      ]
+    },
+    "test": {
+      "count": 15,
+      "template_group_ids": [
+        13,
+        14,
+        15
+      ]
+    }
+  },
+  "classes": [
+    "Cardiology",
+    "Dermatology",
+    "General Medicine",
+    "Orthopedics",
+    "Pediatrics"
+  ],
+  "seed": 42,
+  "selected_C": 0.5,
+  "confidence_threshold": 0.25,
+  "margin_threshold": 0.06,
+  "threshold_selection": "80% of minimum training-only-model validation confidence/margin, with floors 0.25/0.06; uncalibrated, plus explicit-intent guard",
+  "validation_trials": [
+    {
+      "C": 0.5,
+      "macro_f1": 1.0
+    },
+    {
+      "C": 1,
+      "macro_f1": 1.0
+    },
+    {
+      "C": 2,
+      "macro_f1": 1.0
+    },
+    {
+      "C": 4,
+      "macro_f1": 0.9314285714285713
+    },
+    {
+      "C": 8,
+      "macro_f1": 0.9314285714285713
+    }
+  ],
+  "baseline": {
+    "accuracy": 0.6666666666666666,
+    "macro_f1": 0.6676190476190476,
+    "per_class": {
+      "Cardiology": {
+        "precision": 1.0,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.8,
+        "support": 3.0
+      },
+      "Dermatology": {
+        "precision": 1.0,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.8,
+        "support": 3.0
+      },
+      "General Medicine": {
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1-score": 0.6666666666666666,
+        "support": 3.0
+      },
+      "Orthopedics": {
+        "precision": 1.0,
+        "recall": 0.3333333333333333,
+        "f1-score": 0.5,
+        "support": 3.0
+      },
+      "Pediatrics": {
+        "precision": 0.5,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.5714285714285714,
+        "support": 3.0
+      },
+      "accuracy": 0.6666666666666666,
+      "macro avg": {
+        "precision": 0.8,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.6676190476190476,
+        "support": 15.0
+      },
+      "weighted avg": {
+        "precision": 0.8,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.6676190476190477,
+        "support": 15.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        2,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        2,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        3,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        2
+      ]
+    ],
+    "latency_ms_median_batch_one_model_only": 0.08225000055972487,
+    "errors": [
+      {
+        "text": "Which providers practice cardiovascular medicine",
+        "expected": "Cardiology",
+        "predicted": "General Medicine"
+      },
+      {
+        "text": "Help with finding dermatological consultants",
+        "expected": "Dermatology",
+        "predicted": "Pediatrics"
+      },
+      {
+        "text": "Which providers practice orthopedic medicine",
+        "expected": "Orthopedics",
+        "predicted": "General Medicine"
+      },
+      {
+        "text": "Help with finding musculoskeletal consultants",
+        "expected": "Orthopedics",
+        "predicted": "Pediatrics"
+      },
+      {
+        "text": "Which providers practice pediatric medicine",
+        "expected": "Pediatrics",
+        "predicted": "General Medicine"
+      }
+    ]
+  },
+  "neural": {
+    "accuracy": 0.6666666666666666,
+    "macro_f1": 0.6699999999999999,
+    "per_class": {
+      "Cardiology": {
+        "precision": 0.4,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.5,
+        "support": 3.0
+      },
+      "Dermatology": {
+        "precision": 1.0,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.8,
+        "support": 3.0
+      },
+      "General Medicine": {
+        "precision": 0.6,
+        "recall": 1.0,
+        "f1-score": 0.75,
+        "support": 3.0
+      },
+      "Orthopedics": {
+        "precision": 1.0,
+        "recall": 0.3333333333333333,
+        "f1-score": 0.5,
+        "support": 3.0
+      },
+      "Pediatrics": {
+        "precision": 1.0,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.8,
+        "support": 3.0
+      },
+      "accuracy": 0.6666666666666666,
+      "macro avg": {
+        "precision": 0.8,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.6699999999999999,
+        "support": 15.0
+      },
+      "weighted avg": {
+        "precision": 0.8,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.67,
+        "support": 15.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        2,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        1,
+        2,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        3,
+        0,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        2
+      ]
+    ],
+    "latency_ms_median_batch_one_model_only": 0.07347949576796964,
+    "errors": [
+      {
+        "text": "Which providers practice cardiovascular medicine",
+        "expected": "Cardiology",
+        "predicted": "General Medicine"
+      },
+      {
+        "text": "Help with finding dermatological consultants",
+        "expected": "Dermatology",
+        "predicted": "Cardiology"
+      },
+      {
+        "text": "Which providers practice orthopedic medicine",
+        "expected": "Orthopedics",
+        "predicted": "General Medicine"
+      },
+      {
+        "text": "Help with finding musculoskeletal consultants",
+        "expected": "Orthopedics",
+        "predicted": "Cardiology"
+      },
+      {
+        "text": "Help with finding paediatric consultants",
+        "expected": "Pediatrics",
+        "predicted": "Cardiology"
+      }
+    ],
+    "parameter_bytes": 10536
+  },
+  "selected_neural_hidden_layers": [
+    16,
+    16
+  ],
+  "artifact_bytes": 8523,
+  "baseline_parameter_bytes": 2400,
+  "peak_process_rss_bytes": 128450560,
+  "environment": {
+    "python": "3.15.1",
+    "sklearn": "1.9.1"
+  },
+  "limitations": [
+    "80 synthetic explicit navigation intents, no authentic patient language",
+    "Small test set and correlated author/template vocabulary; metrics do not generalize to symptoms",
+    "No clinical label review, no multilingual evaluation",
+    "Neural comparison is a tiny MLP, not transformer fine tuning",
+    "Latency excludes vectorization, network, cold starts and provider lookup; RSS includes both experiments"
+  ]
+}

@@ -274,6 +274,7 @@ export default function PatientDashboard() {
         <div className="dashboard-title-wrap">
           <p className="dashboard-eyebrow">PATIENT CARE PORTAL</p>
           <h1>Welcome, {user?.profile?.full_name || 'Patient'}</h1>
+          <p><Link to="/home-care">Care at Home — request support and track enquiries</Link></p>
           <p className="dashboard-user-meta">
             Logged in as <strong>{user?.email}</strong> · Role: Patient
           </p>

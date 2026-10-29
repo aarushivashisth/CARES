@@ -16,13 +16,14 @@ export function notFoundHandler(req, res, next) {
  * Centralized error handling middleware
  */
 export function errorHandler(err, req, res, next) {
-  logger.error(`Unhandled error during request [${req.method} ${req.originalUrl}]`, err);
+  logger.error('Request failed', { method:req.method, code:err.code || 'ERROR', status:err.status || 500 });
 
-  const statusCode = err.status || err.statusCode || 500;
+  const conflict = err.code === '23505' || (err.code === 'ERR_SQLITE_ERROR' && /UNIQUE constraint/i.test(err.message));
+  const statusCode = conflict ? 409 : (err.status || err.statusCode || 500);
   const response = {
     success: false,
-    error: err.message || 'Internal Server Error',
-    code: err.code || 'INTERNAL_SERVER_ERROR'
+    error: conflict ? 'A conflicting record already exists.' : statusCode >= 500 && config.nodeEnv !== 'development' ? 'The service could not complete this request.' : (err.message || 'Internal Server Error'),
+    code: statusCode >= 500 ? 'INTERNAL_SERVER_ERROR' : (err.code || 'REQUEST_ERROR')
   };
 
   if (config.nodeEnv === 'development' && err.stack) {

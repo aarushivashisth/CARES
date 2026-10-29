@@ -40,10 +40,10 @@ export function AuthProvider({ children }) {
     verifySession();
   }, []);
 
-  const login = async (email, password) => {
+  const login = async (email, password, application = false) => {
     setAuthError(null);
     try {
-      const response = await api.post('/auth/login', { email, password });
+      const response = await api.post(application ? '/auth/application-login' : '/auth/login', { email, password });
       if (response.success && response.token) {
         localStorage.setItem('cares_auth_token', response.token);
         setToken(response.token);

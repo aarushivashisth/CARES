@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/useAuth.js';
 import './LoginPage.css';
 
@@ -11,6 +11,8 @@ const DEMO_ACCOUNTS = [
 ];
 
 export default function LoginPage() {
+  const [searchParams] = useSearchParams();
+  const application = searchParams.get('application') === '1';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -44,8 +46,9 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      const user = await login(email, password);
-      handleRoleRedirect(user.role);
+      const user = await login(email, password, application);
+      if (user.status === 'pending_approval') navigate('/doctor/application');
+      else handleRoleRedirect(user.role);
     } catch (err) {
       setErrorMsg(err.message || 'Login failed. Please check your credentials.');
     } finally {
@@ -110,6 +113,8 @@ export default function LoginPage() {
           </button>
         </form>
 
+        <p><Link to="/login?application=1">Pending doctor application? Sign in to view or clarify your review</Link></p>
+        {application && <p role="note">Application sessions can only view and respond to your own credential review.</p>}
         <div className="login-footer-links">
           <span>New patient?</span>
           <Link to="/register">Create patient account</Link>

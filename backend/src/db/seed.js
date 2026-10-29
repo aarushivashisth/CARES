@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'node:url';
 import { db } from './connection.js';
@@ -13,11 +14,17 @@ export { isLiveDatabase, resolveDatabasePath };
 
 export async function seedDatabase(targetPath = config.databasePath) {
   const activePath = targetPath || config.databasePath;
-  if (isLiveDatabase(activePath)) {
+  if (isLiveDatabase(activePath) || isLiveDatabase(config.databasePath)) {
     throw new Error(
       `CRITICAL SAFETY GUARD: Database seeding is refused because the target database (${activePath}) resolves to the protected live database (cares.db). Seeding wipes all existing data. To seed demonstration or test data, explicitly configure DATABASE_PATH to point to a dedicated database (e.g., ./data/cares.demo.db).`
     );
   }
+
+  if (resolveDatabasePath(activePath) !== resolveDatabasePath(config.databasePath)) throw new Error('Seed target must match the explicitly configured DATABASE_PATH.');
+  const resolved = resolveDatabasePath(config.databasePath);
+  if (fs.existsSync(resolved) && fs.statSync(resolved).size > 0) throw new Error('Seeding an existing database is refused. Choose a new disposable database path.');
+
+  if (config.databaseUrl) throw new Error('SQLite seeding cannot be used with DATABASE_URL. Do not seed production PostgreSQL.');
 
   console.log('🌱 Starting database seeding with synthetic demonstration data...');
 

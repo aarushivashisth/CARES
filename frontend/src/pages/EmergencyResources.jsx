@@ -11,9 +11,9 @@ const VERIFIED_HELPLINES = [
     badgeClass: 'standard',
     description:
       'Single unified toll-free emergency number across India for medical, police, fire, and disaster rescue response.',
-    timing: '24/7 Toll-Free',
+    timing: 'Emergency contact',
     source: 'Emergency Response Support System (ERSS), Ministry of Home Affairs',
-    tel: 'tel:112',
+    tel: 'tel:112', url: 'https://112.gov.in/',
   },
   {
     number: '108',
@@ -21,10 +21,10 @@ const VERIFIED_HELPLINES = [
     category: 'Ambulance / Trauma',
     badgeClass: 'ambulance',
     description:
-      'Dedicated emergency medical dispatch for accident rescue, trauma transport, acute critical illness, and disaster medical relief.',
-    timing: '24/7 Toll-Free',
+      'Emergency ambulance response in participating states/UTs. Local coverage varies; use 112 for the national emergency contact.',
+    timing: 'Availability and hours vary by state/UT',
     source: 'National Health Mission (NHM) & State Health Departments',
-    tel: 'tel:108',
+    tel: 'tel:108', url: 'https://nhm.gov.in/nhm_live/index1.php?lang=1&level=2&lid=189&sublinkid=1217',
   },
   {
     number: '102',
@@ -32,21 +32,21 @@ const VERIFIED_HELPLINES = [
     category: 'Pregnancy & Infant',
     badgeClass: 'maternal',
     description:
-      'Free dedicated transport service for pregnant women in labor and sick infants under national maternal healthcare programs.',
-    timing: '24/7 Toll-Free',
+      'Basic patient transport, particularly for pregnant women and children, in participating states/UTs. Eligibility and local service arrangements vary.',
+    timing: 'Availability and hours vary by state/UT',
     source: 'Janani Shishu Suraksha Karyakram (JSSK), MoHFW',
-    tel: 'tel:102',
+    tel: 'tel:102', url: 'https://nhm.gov.in/nhm_live/index1.php?lang=1&level=2&lid=189&sublinkid=1217',
   },
   {
     number: '1075',
-    title: 'National Health Helpline (MoHFW)',
+    title: 'COVID-19 Helpline (MoHFW)',
     category: 'Health Advisory',
     badgeClass: 'advisory',
     description:
-      'Government health advisory line for public health guidance, epidemic information, central hospital queries, and health schemes.',
-    timing: '24/7 Toll-Free',
+      'Listed by MoHFW for COVID-19 information. Current operating hours are not verified; this is not a general emergency dispatch line.',
+    timing: 'Current hours unverified',
     source: 'Ministry of Health and Family Welfare (MoHFW)',
-    tel: 'tel:1075',
+    tel: 'tel:1075', url: 'https://covid19dashboard.mohfw.gov.in/',
   },
   {
     number: '104',
@@ -54,10 +54,10 @@ const VERIFIED_HELPLINES = [
     category: 'Medical Advice',
     badgeClass: 'telecare',
     description:
-      'State-level health information for non-emergency clinical guidance, blood bank directory checks, and public healthcare assistance.',
-    timing: '24/7 (In participating states)',
+      'Health information in participating states. The cited Assam service is state-specific; do not assume availability elsewhere.',
+    timing: 'State-specific; confirm local availability',
     source: 'State Departments of Health & Family Welfare',
-    tel: 'tel:104',
+    tel: 'tel:104', url: 'https://hfw.assam.gov.in/how-to/get-emergency-services-through-104',
   },
 ];
 
@@ -66,7 +66,7 @@ const EMERGENCY_STEPS = [
     step: '01',
     title: 'Call Responders Immediately',
     description:
-      'Dial 112 or 108 without hesitation for chest pain, sudden numbness, severe breathing difficulty, massive bleeding, or loss of consciousness.',
+      'Dial 112 (or 108 where locally available) immediately for chest pain, sudden numbness, severe breathing difficulty, massive bleeding, or loss of consciousness.',
   },
   {
     step: '02',
@@ -149,7 +149,7 @@ export default function EmergencyResources() {
         <div className="emergency-disclaimer-box" role="note">
           <strong>Important Disclaimer:</strong> CARES is an academic healthcare navigation prototype and is{' '}
           <strong>not</strong> an emergency dispatch service or medical diagnostic tool. If you or someone near you
-          is experiencing a life-threatening medical emergency, call <strong>112</strong> or <strong>108</strong>{' '}
+          is experiencing a life-threatening medical emergency, call <strong>112</strong> (or <strong>108</strong> where locally available){' '}
           immediately, or go to the nearest hospital casualty department.
         </div>
 
@@ -177,7 +177,7 @@ export default function EmergencyResources() {
           <div className="section-tag">VERIFIED OFFICIAL CONTACTS</div>
           <h2 id="helplines-heading">National Emergency Numbers in India</h2>
           <p>
-            Toll-free government helplines. 112, 108, 102, and 1075 operate nationwide; 104 is available in participating states.
+            112 is the national emergency number. 108 and 102 services depend on state/UT arrangements; 104 is state-specific and 1075 is listed for COVID-19 information. Sources checked 29 October 2026; call handling and local availability have not been tested.
           </p>
         </div>
 
@@ -193,7 +193,7 @@ export default function EmergencyResources() {
                 <p className="helpline-desc">{helpline.description}</p>
                 <div className="helpline-source">
                   <span>🏛️</span>
-                  <span>{helpline.source}</span>
+                  <a href={helpline.url} target="_blank" rel="noopener noreferrer">{helpline.source} — official source</a>
                 </div>
               </div>
               <div className="helpline-action">
@@ -237,7 +237,7 @@ export default function EmergencyResources() {
           <div className="section-tag">DIRECTORY RESOURCES</div>
           <h2 id="hospitals-heading">Hospitals Reporting Emergency Care</h2>
           <p>
-            Facilities in the CARES directory reporting 24/7 casualty or emergency care availability.
+            Facilities with emergency services recorded in the directory. Hours and current capacity are not live-verified; confirm directly.
           </p>
         </div>
 
@@ -262,7 +262,7 @@ export default function EmergencyResources() {
 
         {!loading && !error && hospitals.length === 0 && (
           <div className="emergency-state-card" data-testid="emergency-empty">
-            <p>No facilities in the directory currently report 24/7 emergency services.</p>
+            <p>No facilities in the directory currently report emergency services.</p>
             <Link to="/hospitals" className="facility-details-link" style={{ display: 'inline-flex' }}>
               Explore Full Hospital Directory →
             </Link>
@@ -275,8 +275,8 @@ export default function EmergencyResources() {
               const isSynthetic = Boolean(hospital.isSynthetic);
               const isSourced = !isSynthetic && hospital.provenanceStatus === 'publicly_sourced';
               const emergencyHours =
-                hospital.operatingHours?.emergency || 'Reported available (confirm with facility)';
-              const regularHours = hospital.operatingHours?.regular || hospital.operatingHours?.opd || 'Hours on record';
+                hospital.operatingHours?.emergency || 'Hours unknown — confirm with facility';
+              const regularHours = hospital.operatingHours?.regular || hospital.operatingHours?.opd || 'Hours unknown';
 
               return (
                 <article
@@ -289,7 +289,7 @@ export default function EmergencyResources() {
 
                     <div className="facility-badge-row">
                       <span className="badge-247-emergency">
-                        🚨 24/7 Emergency (Directory Reported)
+                        {hospital.operatingHours?.emergency === '24/7' ? '🚨 24/7 Emergency (Directory Reported)' : 'Emergency services listed — hours unverified'}
                       </span>
                       {isSynthetic ? (
                         <span className="badge-demo">Demo Facility</span>

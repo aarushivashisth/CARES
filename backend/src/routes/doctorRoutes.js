@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import { db } from '../db/connection.js';
+import { Router } from '../middleware/asyncRouter.js';
+import { db } from '../db/database.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
 import { validateBody } from '../middleware/validateMiddleware.js';
@@ -10,8 +10,8 @@ const router = Router();
  * GET /api/doctors
  * Public database-backed provider directory with provenance and verification tracking
  */
-router.get('/', (req, res) => {
-  const doctors = db.all(
+router.get('/', async (req, res) => {
+  const doctors = await db.all(
     `SELECT 
        d.id, d.full_name, d.specialty, d.license_number, d.issuing_council, d.qualifications,
        d.experience_years, d.bio, d.rating, d.reviews_count, d.consultation_fee,
@@ -39,11 +39,11 @@ router.get('/', (req, res) => {
       qualifications: doc.qualifications || null,
       experience: doc.experience_years,
       bio: doc.bio,
-      rating: doc.rating,
+      rating: doc.is_synthetic || doc.reviews_count > 0 ? doc.rating : null,
       reviews: doc.reviews_count,
       consultationFee: doc.consultation_fee,
-      hospital: doc.hospital_name || 'Riverside Medical Center',
-      distance: doc.distance_text || '1.8 miles away',
+      hospital: doc.hospital_name || 'Affiliation not recorded',
+      distance: doc.distance_text || 'Distance not recorded',
       languages: JSON.parse(doc.languages_json || '[]'),
       visitTypes: JSON.parse(doc.visit_types_json || '[]'),
       slots: JSON.parse(doc.available_slots_json || '[]'),
@@ -55,9 +55,9 @@ router.get('/', (req, res) => {
       registrationCheckStatus: doc.registration_check_status || 'unchecked',
       isSynthetic: Boolean(doc.is_synthetic),
       sourceUrl: doc.source_url || null,
-      sourceOrganization: doc.source_organization || 'CARES Academic Prototype Dataset',
+      sourceOrganization: doc.source_organization || (doc.is_synthetic ? 'CARES Academic Prototype Dataset' : 'Source not recorded'),
       lastCheckedDate: doc.last_checked_date || null,
-      provenanceStatus: doc.provenance_status || 'synthetic_demo',
+      provenanceStatus: !doc.is_synthetic && doc.provenance_status === 'synthetic_demo' ? 'provenance_not_recorded' : (doc.provenance_status || 'provenance_not_recorded'),
       affiliationSource: doc.affiliation_source || null,
     };
   });
@@ -73,7 +73,7 @@ router.get('/', (req, res) => {
  * GET /api/doctors/:id
  * Public database-backed single provider details with provenance tracking
  */
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   const doctorId = parseInt(req.params.id, 10);
   if (isNaN(doctorId)) {
     return res.status(400).json({
@@ -83,7 +83,7 @@ router.get('/:id', (req, res) => {
     });
   }
 
-  const doc = db.get(
+  const doc = await db.get(
     `SELECT 
        d.id, d.full_name, d.specialty, d.license_number, d.issuing_council, d.qualifications,
        d.experience_years, d.bio, d.rating, d.reviews_count, d.consultation_fee,
@@ -120,11 +120,11 @@ router.get('/:id', (req, res) => {
       qualifications: doc.qualifications || null,
       experience: doc.experience_years,
       bio: doc.bio,
-      rating: doc.rating,
+      rating: doc.is_synthetic || doc.reviews_count > 0 ? doc.rating : null,
       reviews: doc.reviews_count,
       consultationFee: doc.consultation_fee,
-      hospital: doc.hospital_name || 'Riverside Medical Center',
-      distance: doc.distance_text || '1.8 miles away',
+      hospital: doc.hospital_name || 'Affiliation not recorded',
+      distance: doc.distance_text || 'Distance not recorded',
       languages: JSON.parse(doc.languages_json || '[]'),
       visitTypes: JSON.parse(doc.visit_types_json || '[]'),
       slots: JSON.parse(doc.available_slots_json || '[]'),
@@ -136,9 +136,9 @@ router.get('/:id', (req, res) => {
       registrationCheckStatus: doc.registration_check_status || 'unchecked',
       isSynthetic: Boolean(doc.is_synthetic),
       sourceUrl: doc.source_url || null,
-      sourceOrganization: doc.source_organization || 'CARES Academic Prototype Dataset',
+      sourceOrganization: doc.source_organization || (doc.is_synthetic ? 'CARES Academic Prototype Dataset' : 'Source not recorded'),
       lastCheckedDate: doc.last_checked_date || null,
-      provenanceStatus: doc.provenance_status || 'synthetic_demo',
+      provenanceStatus: !doc.is_synthetic && doc.provenance_status === 'synthetic_demo' ? 'provenance_not_recorded' : (doc.provenance_status || 'provenance_not_recorded'),
       affiliationSource: doc.affiliation_source || null,
     },
   });
@@ -194,8 +194,8 @@ function getTodayDateString() {
  * GET /api/doctor/appointments
  * Protected doctor endpoint returning appointment requests assigned to this doctor
  */
-router.get('/portal/appointments', authenticateToken, requireRole('doctor'), (req, res) => {
-  const doctor = db.get(
+router.get('/portal/appointments', authenticateToken, requireRole('doctor'), async (req, res) => {
+  const doctor = await db.get(
     `SELECT id FROM doctor_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -208,7 +208,7 @@ router.get('/portal/appointments', authenticateToken, requireRole('doctor'), (re
     });
   }
 
-  const appointments = db.all(
+  const appointments = await db.all(
     `SELECT
        a.id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.created_at, a.updated_at,
        p.full_name AS patient_name, p.phone AS patient_phone, p.gender AS patient_gender,
@@ -235,7 +235,7 @@ router.get('/portal/appointments', authenticateToken, requireRole('doctor'), (re
  * Handler for doctor updating appointment status (accept, decline, complete, cancel)
  * Enforces doctor ownership, state machine transitions, accepted slot collision prevention, and audit history.
  */
-function handleStatusUpdate(req, res) {
+async function handleStatusUpdate(req, res) {
   const appointmentId = parseInt(req.params.id, 10);
   const { status, notes } = req.body;
 
@@ -248,7 +248,7 @@ function handleStatusUpdate(req, res) {
   }
 
   // Doctor profile for authenticated user
-  const doctor = db.get(
+  const doctor = await db.get(
     `SELECT id, full_name FROM doctor_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -262,7 +262,7 @@ function handleStatusUpdate(req, res) {
   }
 
   // Find appointment
-  const appointment = db.get(
+  const appointment = await db.get(
     `SELECT * FROM appointment_requests WHERE id = ?`,
     [appointmentId]
   );
@@ -310,7 +310,7 @@ function handleStatusUpdate(req, res) {
 
     if (normalizedTarget === 'accepted') {
       // Check if slot is already confirmed/accepted by another appointment for this doctor
-      const existingAccepted = db.get(
+      const existingAccepted = await db.get(
         `SELECT id FROM appointment_requests
          WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
          AND status IN ('accepted', 'confirmed') AND id != ?`,
@@ -376,7 +376,7 @@ function handleStatusUpdate(req, res) {
   }
 
   // Notes length check
-  if (notes && typeof notes === 'string' && notes.length > 500) {
+  if (notes !== undefined && (typeof notes !== 'string' || notes.length > 500)) {
     return res.status(400).json({
       success: false,
       error: 'Status update notes cannot exceed 500 characters.',
@@ -387,9 +387,9 @@ function handleStatusUpdate(req, res) {
   const finalNotes = notes ? notes.trim() : `Appointment ${normalizedTarget} by Dr. ${doctor.full_name}`;
 
   try {
-    db.transaction((tx) => {
+    await db.transaction(async (tx) => {
       if (normalizedTarget === 'accepted') {
-        const inTxConflict = tx.get(
+        const inTxConflict = await tx.get(
           `SELECT id FROM appointment_requests
            WHERE doctor_id = ? AND requested_date = ? AND preferred_slot = ?
            AND status IN ('accepted', 'confirmed') AND id != ?`,
@@ -402,20 +402,21 @@ function handleStatusUpdate(req, res) {
         }
       }
 
-      tx.run(
+      const transition = await tx.run(
         `UPDATE appointment_requests
          SET status = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-        [normalizedTarget, appointmentId]
+         WHERE id = ? AND status = ?`,
+        [normalizedTarget, appointmentId, currentStatus]
       );
+      if (!transition.changes) throw Object.assign(new Error('Appointment changed; refresh before trying again.'), { status:409, code:'STALE_APPOINTMENT' });
 
-      tx.run(
+      await tx.run(
         `INSERT INTO appointment_status_history (appointment_id, status, notes, changed_by_user_id)
          VALUES (?, ?, ?, ?)`,
         [appointmentId, normalizedTarget, finalNotes, req.user.id]
       );
 
-      tx.run(
+      await tx.run(
         `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
          VALUES (?, 'APPOINTMENT_STATUS_CHANGE', 'APPOINTMENT', ?, ?, ?)`,
         [
@@ -430,7 +431,7 @@ function handleStatusUpdate(req, res) {
     if (
       err.code === 'SLOT_ALREADY_CONFIRMED' ||
       (err.message && err.message.includes('UNIQUE constraint')) ||
-      (err.code && String(err.code).includes('CONSTRAINT'))
+      (err.code && String(err.code).includes('CONSTRAINT')) || err.code === '23505'
     ) {
       return res.status(409).json({
         success: false,
@@ -441,7 +442,7 @@ function handleStatusUpdate(req, res) {
     throw err;
   }
 
-  const updated = db.get(`SELECT * FROM appointment_requests WHERE id = ?`, [appointmentId]);
+  const updated = await db.get(`SELECT * FROM appointment_requests WHERE id = ?`, [appointmentId]);
 
   res.status(200).json({
     success: true,
@@ -482,7 +483,7 @@ router.get(
   '/portal/appointments/:id/history',
   authenticateToken,
   requireRole('doctor'),
-  (req, res) => {
+  async (req, res) => {
     const appointmentId = parseInt(req.params.id, 10);
     if (isNaN(appointmentId)) {
       return res.status(400).json({
@@ -492,7 +493,7 @@ router.get(
       });
     }
 
-    const doctor = db.get(
+    const doctor = await db.get(
       `SELECT id FROM doctor_profiles WHERE user_id = ?`,
       [req.user.id]
     );
@@ -505,7 +506,7 @@ router.get(
       });
     }
 
-    const appointment = db.get(
+    const appointment = await db.get(
       `SELECT id, doctor_id FROM appointment_requests WHERE id = ?`,
       [appointmentId]
     );
@@ -526,7 +527,7 @@ router.get(
       });
     }
 
-    const history = db.all(
+    const history = await db.all(
       `SELECT h.id, h.appointment_id, h.status, h.notes, h.created_at, u.role AS changed_by_role
        FROM appointment_status_history h
        LEFT JOIN users u ON h.changed_by_user_id = u.id
@@ -547,8 +548,8 @@ router.get(
  * GET /api/doctor/dashboard
  * Protected doctor portal summary
  */
-router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, res) => {
-  const doctor = db.get(
+router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), async (req, res) => {
+  const doctor = await db.get(
     `SELECT * FROM doctor_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -562,7 +563,7 @@ router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, 
   }
 
   // Get appointment requests for this doctor
-  const appointments = db.all(
+  const appointments = await db.all(
     `SELECT
        a.id, a.requested_date, a.preferred_slot, a.visit_type, a.reason_for_visit, a.status, a.created_at, a.updated_at,
        p.full_name AS patient_name, p.phone AS patient_phone, p.gender AS patient_gender,
@@ -592,7 +593,7 @@ router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, 
   ).length;
 
   // Get latest verification application
-  const latestApp = db.get(
+  const latestApp = await db.get(
     `SELECT * FROM verification_applications 
      WHERE target_type = 'doctor' AND target_id = ?
      ORDER BY created_at DESC LIMIT 1`,
@@ -654,8 +655,8 @@ router.get('/portal/dashboard', authenticateToken, requireRole('doctor'), (req, 
  * GET /api/doctor/portal/verification
  * Retrieve current doctor credential verification application & status
  */
-router.get('/portal/verification', authenticateToken, requireRole('doctor'), (req, res) => {
-  const doctor = db.get(
+router.get('/portal/verification', authenticateToken, requireRole('doctor'), async (req, res) => {
+  const doctor = await db.get(
     `SELECT * FROM doctor_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -668,7 +669,7 @@ router.get('/portal/verification', authenticateToken, requireRole('doctor'), (re
     });
   }
 
-  const latestApp = db.get(
+  const latestApp = await db.get(
     `SELECT * FROM verification_applications 
      WHERE target_type = 'doctor' AND target_id = ?
      ORDER BY created_at DESC LIMIT 1`,
@@ -724,7 +725,7 @@ router.post(
   '/portal/verification/submit',
   authenticateToken,
   requireRole('doctor'),
-  (req, res) => {
+  async (req, res) => {
     const license_number = req.body.license_number || req.body.licenseNumber;
     const issuing_council = req.body.issuing_council || req.body.issuingCouncil;
     const qualifications = req.body.qualifications;
@@ -755,7 +756,7 @@ router.post(
       });
     }
 
-    const doctor = db.get(
+    const doctor = await db.get(
       `SELECT * FROM doctor_profiles WHERE user_id = ?`,
       [req.user.id]
     );
@@ -788,8 +789,8 @@ router.post(
 
     const evidenceArray = Array.isArray(supporting_evidence) ? supporting_evidence : [];
 
-    const appId = db.transaction((tx) => {
-      tx.run(
+    const appId = await db.transaction(async (tx) => {
+      await tx.run(
         `UPDATE doctor_profiles 
          SET license_number = ?, issuing_council = ?, qualifications = ?,
              verification_status = 'pending', is_verified = 0, updated_at = datetime('now')
@@ -797,7 +798,7 @@ router.post(
         [license_number.trim(), issuing_council.trim(), qualifications.trim(), doctor.id]
       );
 
-      const appResult = tx.run(
+      const appResult = await tx.run(
         `INSERT INTO verification_applications (
           user_id, target_type, target_id, submitted_license_number, issuing_council,
           qualifications, supporting_evidence_json, affiliation_requested, status
@@ -813,7 +814,7 @@ router.post(
         ]
       );
 
-      tx.run(
+      await tx.run(
         `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
          VALUES (?, 'DOCTOR_VERIFICATION_SUBMITTED', 'DOCTOR', ?, ?, ?)`,
         [
@@ -853,7 +854,7 @@ router.post(
   '/portal/verification/clarify',
   authenticateToken,
   requireRole('doctor'),
-  (req, res) => {
+  async (req, res) => {
     const clarification_response = req.body.clarification_response || req.body.clarificationResponse;
 
     if (!clarification_response || typeof clarification_response !== 'string' || clarification_response.trim().length < 5) {
@@ -864,7 +865,7 @@ router.post(
       });
     }
 
-    const doctor = db.get(
+    const doctor = await db.get(
       `SELECT * FROM doctor_profiles WHERE user_id = ?`,
       [req.user.id]
     );
@@ -885,7 +886,7 @@ router.post(
       });
     }
 
-    const latestApp = db.get(
+    const latestApp = await db.get(
       `SELECT id FROM verification_applications 
        WHERE target_type = 'doctor' AND target_id = ?
        ORDER BY created_at DESC LIMIT 1`,
@@ -900,22 +901,22 @@ router.post(
       });
     }
 
-    db.transaction((tx) => {
-      tx.run(
+    await db.transaction(async (tx) => {
+      await tx.run(
         `UPDATE verification_applications
          SET status = 'pending', clarification_response = ?, updated_at = datetime('now')
          WHERE id = ?`,
         [clarification_response.trim(), latestApp.id]
       );
 
-      tx.run(
+      await tx.run(
         `UPDATE doctor_profiles
          SET verification_status = 'pending', updated_at = datetime('now')
          WHERE id = ?`,
         [doctor.id]
       );
 
-      tx.run(
+      await tx.run(
         `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
          VALUES (?, 'DOCTOR_VERIFICATION_CLARIFIED', 'DOCTOR', ?, ?, ?)`,
         [
@@ -943,8 +944,8 @@ router.post(
  * PUT /api/doctor/portal/profile
  * Doctor updates practice settings (bio, consultation fee, languages, visit types, accessibility)
  */
-router.put('/portal/profile', authenticateToken, requireRole('doctor'), (req, res) => {
-  const doctor = db.get(
+router.put('/portal/profile', authenticateToken, requireRole('doctor'), async (req, res) => {
+  const doctor = await db.get(
     `SELECT * FROM doctor_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -1122,8 +1123,8 @@ router.put('/portal/profile', authenticateToken, requireRole('doctor'), (req, re
   }
 
   // 7. Atomic Transaction & Audit Log
-  db.transaction((tx) => {
-    tx.run(
+  await db.transaction(async (tx) => {
+    await tx.run(
       `UPDATE doctor_profiles
        SET bio = ?,
            consultation_fee = ?,
@@ -1143,7 +1144,7 @@ router.put('/portal/profile', authenticateToken, requireRole('doctor'), (req, re
       ]
     );
 
-    tx.run(
+    await tx.run(
       `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
        VALUES (?, 'DOCTOR_PROFILE_UPDATED', 'DOCTOR_PROFILE', ?, ?, ?)`,
       [
@@ -1160,7 +1161,7 @@ router.put('/portal/profile', authenticateToken, requireRole('doctor'), (req, re
     );
   });
 
-  const updated = db.get(`SELECT * FROM doctor_profiles WHERE id = ?`, [doctor.id]);
+  const updated = await db.get(`SELECT * FROM doctor_profiles WHERE id = ?`, [doctor.id]);
 
   const formattedProfile = {
     id: updated.id,
@@ -1192,8 +1193,8 @@ router.put('/portal/profile', authenticateToken, requireRole('doctor'), (req, re
  * PUT /api/doctor/portal/availability
  * Manage doctor intake status (is_accepting_new_patients) and weekly schedule slots (available_slots_json)
  */
-router.put('/portal/availability', authenticateToken, requireRole('doctor'), (req, res) => {
-  const doctor = db.get(
+router.put('/portal/availability', authenticateToken, requireRole('doctor'), async (req, res) => {
+  const doctor = await db.get(
     `SELECT * FROM doctor_profiles WHERE user_id = ?`,
     [req.user.id]
   );
@@ -1343,7 +1344,7 @@ router.put('/portal/availability', authenticateToken, requireRole('doctor'), (re
       for (const removed of removedSlots) {
         const unpadded = removed.replace(/^0/, '');
         const padded = removed.match(/^[1-9]:/) ? `0${removed}` : removed;
-        const conflict = db.get(
+        const conflict = await db.get(
           `SELECT COUNT(*) as count, MIN(requested_date) as earliest_date
            FROM appointment_requests
            WHERE doctor_id = ?
@@ -1378,8 +1379,8 @@ router.put('/portal/availability', authenticateToken, requireRole('doctor'), (re
   const slotsJson = JSON.stringify(validatedSlots);
   const acceptingInt = validatedAccepting ? 1 : 0;
 
-  db.transaction((tx) => {
-    tx.run(
+  await db.transaction(async (tx) => {
+    await tx.run(
       `UPDATE doctor_profiles
        SET is_accepting_new_patients = ?,
            available_slots_json = ?,
@@ -1388,7 +1389,7 @@ router.put('/portal/availability', authenticateToken, requireRole('doctor'), (re
       [acceptingInt, slotsJson, doctor.id, req.user.id]
     );
 
-    tx.run(
+    await tx.run(
       `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
        VALUES (?, 'DOCTOR_AVAILABILITY_UPDATED', 'DOCTOR', ?, ?, ?)`,
       [
@@ -1404,7 +1405,7 @@ router.put('/portal/availability', authenticateToken, requireRole('doctor'), (re
     );
   });
 
-  const updated = db.get(`SELECT * FROM doctor_profiles WHERE id = ?`, [doctor.id]);
+  const updated = await db.get(`SELECT * FROM doctor_profiles WHERE id = ?`, [doctor.id]);
 
   res.status(200).json({
     success: true,

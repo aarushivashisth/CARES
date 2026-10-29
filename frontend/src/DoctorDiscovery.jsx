@@ -1,11 +1,10 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./DoctorDiscovery.css";
 import { api } from "./services/apiClient.js";
-import { doctors as fallbackDoctors } from "./doctorData.js";
 
 const initialFilters = {
-  next3Days: true,
+  next3Days: false,
   today: false,
   thisWeek: false,
   inPerson: true,
@@ -19,12 +18,14 @@ const initialFilters = {
 };
 
 export default function DoctorDiscovery() {
-  const [specialty, setSpecialty] = useState("All specialties");
+  const [params] = useSearchParams();
+  const selectedSpecialty = params.get("specialty") || "All specialties";
+  const [specialty, setSpecialty] = useState(selectedSpecialty);
   const [location, setLocation] = useState("");
   const [insurance, setInsurance] = useState("Any insurance");
 
   const [search, setSearch] = useState({
-    specialty: "All specialties",
+    specialty: selectedSpecialty,
     location: "",
     insurance: "Any insurance",
   });
@@ -47,10 +48,7 @@ export default function DoctorDiscovery() {
     } catch (err) {
       console.error("Error fetching provider directory:", err);
       setError(err.message || "Unable to load doctors from database.");
-      // If offline/fallback needed, populate fallbackDoctors so UI remains functional
-      if (fallbackDoctors && fallbackDoctors.length > 0) {
-        setDoctorRecords(fallbackDoctors);
-      }
+      setDoctorRecords([]);
     } finally {
       setLoading(false);
     }
@@ -73,9 +71,7 @@ export default function DoctorDiscovery() {
         if (isMounted) {
           console.error("Error fetching provider directory:", err);
           setError(err.message || "Unable to load doctors from database.");
-          if (fallbackDoctors && fallbackDoctors.length > 0) {
-            setDoctorRecords(fallbackDoctors);
-          }
+          setDoctorRecords([]);
           setLoading(false);
         }
       }
@@ -104,8 +100,8 @@ export default function DoctorDiscovery() {
       const docVisitTypes = Array.isArray(doctor.visitTypes) ? doctor.visitTypes : [];
       const docAvailability = Array.isArray(doctor.availability)
         ? doctor.availability
-        : ["Next 3 days", "This week"];
-      const docGender = doctor.gender || (docName.includes("Maya") || docName.includes("Sofia") ? "Female" : "Male");
+        : [];
+      const docGender = doctor.gender || "Unknown";
 
       const searchText = search.location.trim().toLowerCase();
 
@@ -179,7 +175,7 @@ export default function DoctorDiscovery() {
     setInsurance("Any insurance");
 
     setSearch({
-      specialty: "All specialties",
+      specialty: selectedSpecialty,
       location: "",
       insurance: "Any insurance",
     });
@@ -193,8 +189,9 @@ export default function DoctorDiscovery() {
         <p className="doctor-eyebrow">FIND YOUR CARE PARTNER</p>
         <h1>Good care starts with the right person.</h1>
         <p>
-          Find the expertise you need, with the understanding you deserve.
+          Find the expertise you need. Published slots are request options, not live availability.
         </p>
+      <p><Link to="/navigator">CareMatch specialty navigation and Care Navigator</Link></p>
       </section>
 
       <form
@@ -261,42 +258,7 @@ export default function DoctorDiscovery() {
             </button>
           </div>
 
-          <p>Availability</p>
-
-          <label>
-            <input
-              type="checkbox"
-              checked={filters.next3Days}
-              onChange={(event) =>
-                updateFilter("next3Days", event.target.checked)
-              }
-            />
-            Next 3 days
-          </label>
-
-          <label>
-            <input
-              type="checkbox"
-              checked={filters.today}
-              onChange={(event) =>
-                updateFilter("today", event.target.checked)
-              }
-            />
-            Today
-          </label>
-
-          <label>
-            <input
-              type="checkbox"
-              checked={filters.thisWeek}
-              onChange={(event) =>
-                updateFilter("thisWeek", event.target.checked)
-              }
-            />
-            This week
-          </label>
-
-          <hr />
+          <p>Published slots are request options. Date-specific availability is not recorded.</p>
 
           <p>Visit type</p>
 
@@ -377,12 +339,14 @@ export default function DoctorDiscovery() {
           <label>
             <input
               type="checkbox"
+              disabled
+              title="Clinician gender is not recorded in this directory"
               checked={filters.female}
               onChange={(event) =>
                 updateFilter("female", event.target.checked)
               }
             />
-            Female doctor
+            Female doctor (not recorded)
           </label>
 
           <label>
@@ -474,11 +438,11 @@ export default function DoctorDiscovery() {
                     </div>
                     <p className="doctor-specialty">{doctor.specialty}</p>
                     <p>
-                      ★ {doctor.rating || "5.0"} ({doctor.reviews || 0} reviews) ·{" "}
+                      {doctor.rating != null ? `★ ${doctor.rating} (${doctor.reviews || 0} reviews)` : "Rating not recorded"} ·{" "}
                       {doctor.experience || 0} years in practice
                     </p>
                     <p>
-                      {doctor.hospital || "Riverside Medical Center"} · {doctor.distance || "Local facility"}
+                      {doctor.hospital || "Affiliation not recorded"} · {doctor.distance || "Distance not recorded"}
                     </p>
                     <p>
                       {(doctor.languages || []).join(", ") || "English"} ·{" "}

@@ -27,7 +27,7 @@ function applyMigrations() {
     if (!hospCols.includes('last_checked_date')) db.exec("ALTER TABLE hospitals ADD COLUMN last_checked_date TEXT DEFAULT NULL;");
     if (!hospCols.includes('provenance_status')) db.exec("ALTER TABLE hospitals ADD COLUMN provenance_status TEXT DEFAULT 'synthetic_demo';");
     if (!hospCols.includes('website_url')) db.exec("ALTER TABLE hospitals ADD COLUMN website_url TEXT DEFAULT NULL;");
-    if (!hospCols.includes('operating_hours_json')) db.exec("ALTER TABLE hospitals ADD COLUMN operating_hours_json TEXT DEFAULT '{\"regular\":\"08:00 - 20:00\",\"emergency\":\"24/7\"}';");
+    if (!hospCols.includes('operating_hours_json')) db.exec("ALTER TABLE hospitals ADD COLUMN operating_hours_json TEXT DEFAULT '{}';");
     if (!hospCols.includes('affiliation_source')) db.exec("ALTER TABLE hospitals ADD COLUMN affiliation_source TEXT DEFAULT NULL;");
 
     const affCols = db.all("PRAGMA table_info(doctor_hospital_affiliations)").map((c) => c.name);
@@ -261,7 +261,7 @@ function applyMigrations() {
           phone TEXT,
           email TEXT,
           website_url TEXT DEFAULT NULL,
-          operating_hours_json TEXT NOT NULL DEFAULT '{"regular":"08:00 - 20:00","emergency":"24/7"}',
+          operating_hours_json TEXT NOT NULL DEFAULT '{}',
           crowd_level TEXT NOT NULL DEFAULT 'moderate' CHECK(crowd_level IN ('low', 'moderate', 'high', 'critical')),
           emergency_available INTEGER DEFAULT NULL,
           is_verified INTEGER NOT NULL DEFAULT 0,
@@ -309,6 +309,7 @@ export function initDatabase() {
   console.log('🔄 Initializing database schema...');
   db.exec(schemaSql);
   applyMigrations();
+  db.exec(fs.readFileSync(path.resolve(__dirname, 'migrations/002_home_care.sql'), 'utf-8'));
   console.log('✅ Database schema and migrations applied successfully.');
 }
 

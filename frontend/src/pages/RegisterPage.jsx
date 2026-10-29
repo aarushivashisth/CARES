@@ -45,7 +45,7 @@ export default function RegisterPage() {
           <p className="login-eyebrow">NEW PATIENT REGISTRATION</p>
           <h1>Create your CARES account.</h1>
           <p className="login-subtitle">
-            Sign up to track appointment requests, save trusted healthcare providers, and manage your health journey.
+            Sign up to track appointment requests, and manage your care enquiries.
           </p>
         </div>
 
@@ -79,13 +79,13 @@ export default function RegisterPage() {
           </label>
 
           <label className="login-field">
-            <span>Password (min. 6 characters)</span>
+            <span>Password (min. 10 characters)</span>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Create a secure password"
-              minLength={6}
+              minLength={10}
               required
             />
           </label>
@@ -143,6 +143,7 @@ export default function RegisterPage() {
         </form>
 
         <div className="login-footer-links">
+          <Link to="/apply-doctor">Doctor? Apply for credential review</Link>
           <span>Already registered?</span>
           <Link to="/login">Sign in here</Link>
         </div>

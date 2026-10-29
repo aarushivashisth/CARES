@@ -6,7 +6,7 @@ import { logger } from './utils/logger.js';
 
 // Ensure database schema is ready on startup
 try {
-  initDatabase();
+  if (!config.databaseUrl) initDatabase();
 } catch (dbErr) {
   logger.error('Failed to initialize database schema on startup', dbErr);
   process.exit(1);

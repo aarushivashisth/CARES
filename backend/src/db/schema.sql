@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS hospitals (
   phone TEXT,
   email TEXT,
   website_url TEXT DEFAULT NULL,
-  operating_hours_json TEXT NOT NULL DEFAULT '{"regular":"08:00 - 20:00","emergency":"24/7"}',
+  operating_hours_json TEXT NOT NULL DEFAULT '{}',
   crowd_level TEXT NOT NULL DEFAULT 'moderate' CHECK(crowd_level IN ('low', 'moderate', 'high', 'critical')),
   emergency_available INTEGER DEFAULT NULL,
   is_verified INTEGER NOT NULL DEFAULT 0,

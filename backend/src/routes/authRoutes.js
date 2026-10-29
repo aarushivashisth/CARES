@@ -1,11 +1,12 @@
-import { Router } from 'express';
+import { Router } from '../middleware/asyncRouter.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { db } from '../db/connection.js';
+import { db } from '../db/database.js';
 import { config } from '../config/env.js';
 import { validateBody } from '../middleware/validateMiddleware.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
-import { authRateLimiter } from '../middleware/rateLimitMiddleware.js';
+import { sharedRateLimiter } from '../middleware/sharedRateLimit.js';
+const authRateLimiter=sharedRateLimiter('auth',{maxRequests:process.env.NODE_ENV==='test'?500:10});
 import { logger } from '../utils/logger.js';
 
 const router = Router();
@@ -13,12 +14,12 @@ const router = Router();
 /**
  * Fetch profile data associated with user based on assigned role
  */
-function getUserProfile(userId, role) {
+async function getUserProfile(userId, role) {
   if (role === 'patient') {
-    return db.get(`SELECT * FROM patient_profiles WHERE user_id = ?`, [userId]) || null;
+    return await db.get(`SELECT * FROM patient_profiles WHERE user_id = ?`, [userId]) || null;
   }
   if (role === 'doctor') {
-    const doc = db.get(`SELECT * FROM doctor_profiles WHERE user_id = ?`, [userId]);
+    const doc = await db.get(`SELECT * FROM doctor_profiles WHERE user_id = ?`, [userId]);
     if (doc) {
       return {
         ...doc,
@@ -31,7 +32,7 @@ function getUserProfile(userId, role) {
     return null;
   }
   if (role === 'hospital') {
-    const hosp = db.get(`SELECT * FROM hospitals WHERE user_id = ?`, [userId]);
+    const hosp = await db.get(`SELECT * FROM hospitals WHERE user_id = ?`, [userId]);
     if (hosp) {
       return {
         ...hosp,
@@ -51,7 +52,7 @@ function getUserProfile(userId, role) {
  * Common login for all roles. Role is determined strictly server-side by the database.
  */
 router.post(
-  '/login',
+  ['/login', '/application-login'],
   authRateLimiter,
   validateBody({
     email: { required: true, type: 'email' },
@@ -62,7 +63,7 @@ router.post(
       const { email, password } = req.body;
       const normalizedEmail = email.trim().toLowerCase();
 
-      const user = db.get(`SELECT * FROM users WHERE email = ?`, [normalizedEmail]);
+      const user = await db.get(`SELECT * FROM users WHERE email = ?`, [normalizedEmail]);
 
       if (!user) {
         return res.status(401).json({
@@ -90,15 +91,16 @@ router.post(
         });
       }
 
-      if (user.status === 'pending_approval') {
+      const applicationSession = req.path === '/application-login' && user.role === 'doctor' && user.status === 'pending_approval';
+      if (user.status === 'pending_approval' && !applicationSession) {
         return res.status(403).json({
           success: false,
-          error: 'Your verification application is currently under administrative review. You will receive notification upon approval.',
+          error: 'Your verification application is currently under administrative review. Use the application-status sign-in to check your review.',
           code: 'ACCOUNT_PENDING_APPROVAL'
         });
       }
 
-      if (user.status !== 'active') {
+      if (user.status !== 'active' && !applicationSession) {
         return res.status(403).json({
           success: false,
           error: `Your account is ${user.status}. Please contact platform administration.`,
@@ -108,16 +110,16 @@ router.post(
 
       // Generate signed JWT
       const token = jwt.sign(
-        { userId: user.id, email: user.email, role: user.role },
+        { userId: user.id, email: user.email, role: user.role, purpose: applicationSession ? 'onboarding' : 'session' },
         config.jwtSecret,
         { expiresIn: config.jwtExpiresIn }
       );
 
-      const profile = getUserProfile(user.id, user.role);
+      const profile = await getUserProfile(user.id, user.role);
 
       // Audit login
       try {
-        db.run(
+        await db.run(
           `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
            VALUES (?, 'USER_LOGIN', 'USER', ?, ?, ?)`,
           [user.id, user.id, JSON.stringify({ role: user.role, email: user.email }), req.ip || '127.0.0.1']
@@ -155,7 +157,7 @@ router.post(
   authRateLimiter,
   validateBody({
     email: { required: true, type: 'email' },
-    password: { required: true, minLength: 6 },
+    password: { required: true, minLength: 10 },
     full_name: { required: true, minLength: 2 }
   }),
   async (req, res, next) => {
@@ -164,7 +166,7 @@ router.post(
       const normalizedEmail = email.trim().toLowerCase();
 
       // Check if email already registered
-      const existing = db.get(`SELECT id FROM users WHERE email = ?`, [normalizedEmail]);
+      const existing = await db.get(`SELECT id FROM users WHERE email = ?`, [normalizedEmail]);
       if (existing) {
         return res.status(409).json({
           success: false,
@@ -175,13 +177,13 @@ router.post(
 
       const passwordHash = await bcrypt.hash(password, 10);
 
-      const result = db.transaction((tx) => {
-        const userRes = tx.run(
+      const result = await db.transaction(async (tx) => {
+        const userRes = await tx.run(
           `INSERT INTO users (email, password_hash, role, status) VALUES (?, ?, 'patient', 'active')`,
           [normalizedEmail, passwordHash]
         );
 
-        const profileRes = tx.run(
+        const profileRes = await tx.run(
           `INSERT INTO patient_profiles (user_id, full_name, phone, gender, date_of_birth, city, is_synthetic)
            VALUES (?, ?, ?, ?, ?, ?, 0)`,
           [
@@ -195,13 +197,13 @@ router.post(
         );
 
         // Audit registration
-        tx.run(
+        await tx.run(
           `INSERT INTO audit_events (actor_user_id, action, target_type, target_id, details_json, ip_address)
            VALUES (?, 'PATIENT_REGISTER', 'PATIENT_PROFILE', ?, ?, ?)`,
           [
             userRes.lastInsertRowid,
             profileRes.lastInsertRowid,
-            JSON.stringify({ email: normalizedEmail, full_name: full_name.trim() }),
+            JSON.stringify({ role: 'patient' }),
             req.ip || '127.0.0.1'
           ]
         );
@@ -218,9 +220,9 @@ router.post(
         { expiresIn: config.jwtExpiresIn }
       );
 
-      const profile = getUserProfile(result.userId, 'patient');
+      const profile = await getUserProfile(result.userId, 'patient');
 
-      logger.info('New patient registered successfully', { userId: result.userId, email: normalizedEmail });
+      logger.info('New patient registered successfully', { userId: result.userId });
 
       res.status(201).json({
         success: true,
@@ -244,8 +246,8 @@ router.post(
  * GET /api/auth/me
  * Protected endpoint returning the currently authenticated user's session
  */
-router.get('/me', authenticateToken, (req, res) => {
-  const profile = getUserProfile(req.user.id, req.user.role);
+router.get('/me', authenticateToken, async (req, res) => {
+  const profile = await getUserProfile(req.user.id, req.user.role);
 
   res.status(200).json({
     success: true,
@@ -265,9 +267,10 @@ router.get('/me', authenticateToken, (req, res) => {
  */
 router.post(
   '/apply-doctor',
+  authRateLimiter,
   validateBody({
     email: { required: true, type: 'email' },
-    password: { required: true, minLength: 6 },
+    password: { required: true, minLength: 10 },
     full_name: { required: true, minLength: 2 },
     specialty: { required: true, minLength: 3 },
     license_number: { required: true, minLength: 4 }
@@ -275,9 +278,10 @@ router.post(
   async (req, res, next) => {
     try {
       const { email, password, full_name, specialty, license_number, experience_years, bio } = req.body;
+      if ((experience_years !== undefined && (!Number.isInteger(Number(experience_years)) || Number(experience_years)<0 || Number(experience_years)>80)) || (bio !== undefined && (typeof bio!=='string' || bio.length>1500))) return res.status(400).json({success:false,error:'Provide valid experience and biography.',code:'VALIDATION_ERROR'});
       const normalizedEmail = email.trim().toLowerCase();
 
-      const existing = db.get(`SELECT id FROM users WHERE email = ?`, [normalizedEmail]);
+      const existing = await db.get(`SELECT id FROM users WHERE email = ?`, [normalizedEmail]);
       if (existing) {
         return res.status(409).json({
           success: false,
@@ -288,16 +292,16 @@ router.post(
 
       const passwordHash = await bcrypt.hash(password, 10);
 
-      db.transaction((tx) => {
-        const userRes = tx.run(
+      await db.transaction(async (tx) => {
+        const userRes = await tx.run(
           `INSERT INTO users (email, password_hash, role, status) VALUES (?, ?, 'doctor', 'pending_approval')`,
           [normalizedEmail, passwordHash]
         );
 
-        const docRes = tx.run(
+        const docRes = await tx.run(
           `INSERT INTO doctor_profiles (
-            user_id, full_name, specialty, license_number, experience_years, bio, is_verified, verification_status, is_synthetic
-          ) VALUES (?, ?, ?, ?, ?, ?, 0, 'pending', 0)`,
+            user_id, full_name, specialty, license_number, experience_years, bio, is_verified, verification_status, is_synthetic, source_organization, is_accepting_new_patients, is_wheelchair_accessible
+          ) VALUES (?, ?, ?, ?, ?, ?, 0, 'pending', 0, 'Provider application (self-reported, unverified)', 0, 0)`,
           [
             userRes.lastInsertRowid,
             full_name.trim(),
@@ -308,7 +312,7 @@ router.post(
           ]
         );
 
-        tx.run(
+        await tx.run(
           `INSERT INTO verification_applications (
             user_id, target_type, target_id, submitted_license_number, status
           ) VALUES (?, 'doctor', ?, ?, 'pending')`,
