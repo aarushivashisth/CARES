@@ -1,6 +1,6 @@
 {
   "scope": "Heuristic source/production-bundle pattern scan plus tracked-file and archive entry-name review; not a full security certification. No database or ignored secret env contents opened.",
-  "sourceFilesConsidered": 152,
+  "sourceFilesConsidered": 157,
   "trackedDatabasesOrPrivateEnv": [],
   "potentialSecrets": [],
   "archiveNamesOnly": [

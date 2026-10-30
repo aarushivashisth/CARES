@@ -216,6 +216,8 @@ The isolated synthetic demo fixture creates the following fictional accounts. Th
 
 Use the [Vercel/PostgreSQL deployment guide](docs/DEPLOYMENT_GUIDE.md) and [manual checklist](MANUAL_ACTIONS_REQUIRED.md). The function exports Express without a listener, initialization or seeding. SQLite files cannot provide durable storage in Vercel Functions. Create isolated managed databases and apply reviewed versioned SQL explicitly; never point a preview at production.
 
+For the current Supabase-backed demo with sample data, follow the [Vercel dashboard quickstart](docs/VERCEL_QUICKSTART.md), including the deployed certificate path and exact environment settings.
+
 Do not commit, push, deploy publicly, create billable services or transfer existing records without owner approval. No existing records are imported by setup or migration commands. A schema-only dry-run plan is in `docs/DATA_MIGRATION_DRY_RUN.json`.
 
 ## 12. Safe isolated demonstration and AI reproduction
@@ -244,3 +246,17 @@ For the Gemini demo, privately configure `LLM_PROVIDER=gemini`, `GEMINI_API_KEY`
 Gemini transport is implemented with header-only key authentication, 15-second timeout, bounded JSON Schema output, the existing source/citation validator and no automatic cross-provider fallback. The recommended demo model is listed with free-tier input/output on [Google pricing](https://ai.google.dev/gemini-api/docs/pricing), checked 2026-10-29; account eligibility and quotas still control actual access/cost. Do not enable paid billing for a free-only demo. Use synthetic non-sensitive service questions because free-tier content may be used to improve Google products.
 
 The owner reported creating a Gemini key. No `backend/.env` or configured Gemini key was present during the local setup check, so no live provider request was made. Copy `backend/.env.example` to `backend/.env` privately and enter the key there; never put it in chat, frontend variables, Git or screenshots. Restart the backend after configuration.
+
+## Sample data for an approved development PostgreSQL database
+
+After configuring verified TLS and applying migrations 001–003, an owner-authorized development sample import is available:
+
+```sh
+npm --prefix backend run db:sample:postgres -- --confirm-sample-data
+```
+
+This separate PostgreSQL command adds six fictional accounts, one patient, three doctors, one hospital, one future appointment, one home-care enquiry and one pending doctor application. It preserves existing records, refuses conflicting sample identities, rolls back on failure and skips an already imported dataset. It refuses production mode. It does not read or modify SQLite databases.
+
+Random demo passwords are saved only in `backend/.sample-accounts.json`, with owner-only file permissions. That file is excluded from Git and Vercel uploads. Accounts use `demo.admin@example.com`, `demo.patient@example.com`, `demo.maya@example.com`, `demo.daniel@example.com`, `demo.sofia@example.com` and `demo.hospital@example.com`. Sofia uses application-status sign-in until an administrator reviews the fictional application. The SQLite fixture credentials listed earlier do not apply to this PostgreSQL dataset.
+
+Providers and the patient are explicitly marked synthetic. Provider names include “Demo”; registration numbers start with `DEMO-`, and no real credentials, emergency coverage or verification are asserted.

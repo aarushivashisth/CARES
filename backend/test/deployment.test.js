@@ -19,3 +19,14 @@ test('Protected default SQLite access is denied before opening a database',()=>{
  const result=spawnSync(process.execPath,['--input-type=module','-e',code],{cwd:new URL('../../',import.meta.url),encoding:'utf8',env:{...process.env,NODE_ENV:'test',DATABASE_PATH:'./data/cares.db',DATABASE_URL:'',ALLOW_PROTECTED_DATABASE:'false'}});
  assert.equal(result.status,0,result.stderr);
 });
+test('Vercel bundles the Supabase CA and its documented runtime path enables verified TLS',()=>{
+ const root=new URL('../../',import.meta.url);
+ const deployment=JSON.parse(fs.readFileSync(new URL('vercel.json',root),'utf8'));
+ const included=[...fs.globSync(deployment.functions['api/index.js'].includeFiles,{cwd:root})];
+ assert.ok(included.includes('backend/certs/supabase-ca.crt'));
+ assert.ok(included.includes('backend/src/ai/carematch-model.json'));
+ assert.ok(included.includes('backend/src/ai/corpus/index.json'));
+ const code="const {default:parse}=await import('./backend/node_modules/pg-connection-string/index.js');const value=parse('postgresql://synthetic@db.example.invalid/postgres?sslmode=verify-full&sslrootcert=backend/certs/supabase-ca.crt');if(!value.ssl.ca.includes('BEGIN CERTIFICATE')||value.ssl.rejectUnauthorized===false)process.exit(1)";
+ const result=spawnSync(process.execPath,['--input-type=module','-e',code],{cwd:root,encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
+});

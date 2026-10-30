@@ -4,6 +4,7 @@
 .aws
 **/.env
 **/.env.*
+backend/.sample-accounts.json
 **/*.db*
 **/*.sqlite*
 backend/data
