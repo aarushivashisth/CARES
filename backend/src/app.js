@@ -80,8 +80,8 @@ if (config.nodeEnv !== 'test') {
   app.use(morgan('dev'));
 }
 
-// Root greeting / health redirect
-app.get('/', (req, res) => {
+// Public API greeting retains the /api prefix used by service routing.
+app.get(['/', '/api'], (req, res) => {
   res.status(200).json({
     name: 'CARES Healthcare Navigation REST API',
     status: 'online',

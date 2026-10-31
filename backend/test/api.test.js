@@ -71,6 +71,15 @@ test('GET /api/health returns 200 OK and service metadata', async () => {
   assert.equal(data.database, 'connected');
 });
 
+test('GET /api returns the API greeting rather than JavaScript or SPA HTML', async () => {
+  const res = await fetch(`${baseUrl}/api`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /application\/json/);
+  const data = await res.json();
+  assert.equal(data.status, 'online');
+  assert.equal(data.healthCheck, '/api/health');
+});
+
 test('POST /api/auth/login succeeds for valid admin credentials', async () => {
   const res = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',

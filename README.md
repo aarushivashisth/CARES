@@ -6,7 +6,7 @@ CARES is an integrated full-stack healthcare coordination platform designed to e
 
 ## 1. Architecture & current status
 
-React/Vite frontend and one Express Node 24 function target Vercel, with managed PostgreSQL (Neon pooled TLS recommended). Local SQLite development remains supported with an explicitly selected disposable file. No protected live database has been opened or migrated. No deployment has been performed.
+React/Vite frontend and Express Node 24 backend are configured as independently built services in one Vercel project, with managed PostgreSQL. Public `/api` routes go to `backend`; other paths go to `frontend`. Python in `ml/` is offline training; current inference and retrieval run inside the backend. Service names, public paths, and whether to introduce a separate Python inference service are pending owner confirmation. Local SQLite development remains supported with an explicitly selected disposable file. No protected live SQLite database has been opened or migrated. No deployment has been performed.
 
 Implemented additions: persistent Care at Home enquiries and administrator review; source-qualified emergency contacts and unknown hours; doctor application/clarification sessions; real trained specialty-intent prototype; local vector retrieval with a real backend Anthropic integration; controlled directory/private appointment lookups; async PostgreSQL adapter, versioned migrations and shared rate limits.
 
@@ -61,6 +61,8 @@ Review [`.env.example`](.env.example), [`backend/.env.example`](backend/.env.exa
 ---
 
 ## 4. Starting the Application
+
+For Vercel Services development, run `vercel dev` from the repository root. Use `vercel dev --local` to test without cloud linking. Vercel owns the shared frontend/API routing; service bindings, when declared for server-side callers, are injected at function runtime and must not be manually set or exposed as `VITE_*` variables.
 
 ### Development Mode (Concurrent)
 Open two terminal windows from the repository root:
@@ -214,7 +216,7 @@ The isolated synthetic demo fixture creates the following fictional accounts. Th
 
 ## 11. Production deployment
 
-Use the [Vercel/PostgreSQL deployment guide](docs/DEPLOYMENT_GUIDE.md) and [manual checklist](MANUAL_ACTIONS_REQUIRED.md). The function exports Express without a listener, initialization or seeding. SQLite files cannot provide durable storage in Vercel Functions. Create isolated managed databases and apply reviewed versioned SQL explicitly; never point a preview at production.
+Use the [current Vercel Services quickstart](docs/VERCEL_QUICKSTART.md), [PostgreSQL operations guide](docs/DEPLOYMENT_GUIDE.md) and [manual checklist](MANUAL_ACTIONS_REQUIRED.md). `backend/index.js` exports Express without a listener, initialization or seeding. SQLite files cannot provide durable storage in Vercel Functions. Create isolated managed databases and apply reviewed versioned SQL explicitly; never point a preview at production.
 
 For the current Supabase-backed demo with sample data, follow the [Vercel dashboard quickstart](docs/VERCEL_QUICKSTART.md), including the deployed certificate path and exact environment settings.
 

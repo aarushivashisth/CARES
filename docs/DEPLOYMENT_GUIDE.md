@@ -1,5 +1,7 @@
 # CARES deployment guide
 
+Configuration update, 2026-10-30: the current deployment proposal uses Vercel Services, with `backend/index.js` as the Express entrypoint, an independently built Vite frontend, and public service rewrites. Follow [the Services quickstart](VERCEL_QUICKSTART.md) for current build, routing and certificate-path settings. The older single-function layout described below is historical. Service topology is pending owner confirmation; no separate Python runtime exists in `ml/`.
+
 Status: prepared locally, **not deployed**. Production is not ready for approval until the owner completes managed PostgreSQL, preview, live-AI evaluation and recovery checks. No deployment URLs exist. Do not seed a production database or import existing records under this runbook.
 
 ## Supported topology and runtime

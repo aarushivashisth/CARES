@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.vercel/
 frontend/node_modules/
 backend/node_modules/
 

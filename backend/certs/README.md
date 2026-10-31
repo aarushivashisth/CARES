@@ -10,7 +10,7 @@ The certificate expires on 2031-04-26. It contains no private key or database cr
 
 For local Supabase connections, preserve the credentials and other parameters in your private `backend/.env` database URL, set `sslmode=verify-full`, and add `sslrootcert` with the absolute path to this file. Restart the backend after changing `.env`. For hosted deployments, use the certificate's path in that deployment; a local macOS path will not exist there.
 
-The repository's Vercel function configuration explicitly bundles this public certificate. With the repository root as the Vercel Root Directory, set `sslrootcert=backend/certs/supabase-ca.crt` in the Vercel database URL. Do not copy the `/Users/...` path from the local environment.
+The backend service's Vercel function configuration explicitly bundles this public certificate. Keep the Vercel project Root Directory at the repository root and set `sslrootcert=certs/supabase-ca.crt` in the Vercel database URL. Configuration resolves relative certificate paths against the backend directory, independently of the process working directory. The former `backend/certs/supabase-ca.crt` value remains supported for existing environment settings. Do not copy the `/Users/...` path from the local environment.
 
 Keep TLS certificate and hostname verification enabled. See [Supabase's connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres#ssl).
 

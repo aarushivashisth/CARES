@@ -10,6 +10,19 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const backendRoot = path.resolve(__dirname, '../../');
 
+/** Resolve private TLS certificate paths independently of a service's cwd. */
+export function resolveDatabaseUrl(value) {
+  if (!value) return '';
+  let url;
+  try { url = new URL(value); } catch { return value; }
+  const certificate = url.searchParams.get('sslrootcert');
+  if (!certificate || path.isAbsolute(certificate)) return value;
+  // Accept the former repository-root path as well as the service-root path.
+  const relative = certificate.startsWith('backend/') ? certificate.slice('backend/'.length) : certificate;
+  url.searchParams.set('sslrootcert', path.resolve(backendRoot, relative));
+  return url.href;
+}
+
 /**
  * Resolves a database path string to a canonical absolute path.
  * Relative paths are always anchored to the backend root directory (e.g. ./data/cares.db),
@@ -97,7 +110,7 @@ export function buildConfig(env = process.env) {
 
   return {
     port: parseInt(env.PORT, 10) || 5000,
-    databaseUrl: env.DATABASE_URL || '',
+    databaseUrl: resolveDatabaseUrl(env.DATABASE_URL),
     allowProtectedDatabase: env.ALLOW_PROTECTED_DATABASE === 'true',
     nodeEnv,
     clientOrigin: env.CLIENT_ORIGIN || 'http://localhost:5173',

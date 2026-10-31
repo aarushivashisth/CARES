@@ -1,6 +1,15 @@
-# Deploy the current CARES demo to Vercel
+# Deploy CARES with Vercel Services
 
-This deploys the React frontend and Express API together from the repository root. The Supabase database already has migrations 001–003 and owner-requested fictional sample data. Deployment itself has not been run by this guide.
+The root `vercel.json` configures two independently built services, sharing one project and public origin. This proposal preserves the existing architecture; the service names, public routes, bindings and whether to introduce a Python inference service are pending owner confirmation. No cloud deployment has been run.
+
+| Service | Root / entrypoint | Public paths | Calls to another repository service |
+| --- | --- | --- | --- |
+| `backend` | `backend/`, Express `index.js` | `/api` and `/api/*`, with the prefix preserved | None: inference and retrieval run in-process; PostgreSQL and Gemini/Anthropic are external dependencies |
+| `frontend` | `frontend/`, static Vite build | All remaining paths, including client-side route refreshes | None from server-side functions; browser requests use the shared public `/api` URL |
+
+There is no HTTP app in `ml/`: it trains models offline and exports the model consumed by Node. It is not declared as a deployable service. Creating a private Python service would be an architecture change requiring its own HTTP entrypoint, backend caller, and a binding declared on the backend; that choice has been asked separately.
+
+No service bindings are currently declared because there are no server-to-server calls between repository services. Bindings are function-runtime values, unavailable to Vite's build or a browser, so no artificial frontend binding or `VITE_*` internal URL is configured. Do not manually set binding variables if a future service adds them.
 
 ## 1. Import GitHub
 
@@ -10,13 +19,25 @@ Open https://vercel.com/new, connect the GitHub account with access to `aarushiv
 | --- | --- |
 | Production branch | `master` |
 | Root Directory | Repository root (`./`), not `frontend` or `backend` |
-| Framework Preset | Other |
+| Framework Preset | Service-local: Express for backend, Vite for frontend |
 | Node.js | 24.x |
-| Install Command | `npm ci --prefix backend && npm ci --prefix frontend` |
-| Build Command | `npm run build` |
-| Output Directory | `frontend/dist` |
+| Project-wide install/build/output overrides | Leave unset; each service owns these settings |
 
-`vercel.json` already supplies the install/build/output settings, API routing, SPA fallback, and public CA certificate bundling. No separate backend host or Start Command is needed. Use a protected demo deployment while it contains sample administrator/provider accounts.
+The backend service installs with `npm ci`, exports `backend/index.js`, and bundles `src/ai/**` plus `certs/*.crt` relative to its own root. It starts no listener and runs no schema initialization or seeding when imported. The frontend service installs with `npm ci`, builds with `npm run build`, emits `dist`, and owns the SPA fallback. That fallback matches the app's extensionless browser paths while excluding files with extensions and Vite's `/@...` development endpoints, so scripts, styles and images retain their real content types in both local Services mode and production. Top-level configuration owns public routing and shared headers only. The legacy root `api/index.js` has been removed so it cannot conflict with service routing. Use a protected demo deployment while it contains sample administrator/provider accounts.
+
+## Local service development
+
+From the repository root, run:
+
+```sh
+vercel dev
+# Or, without linking or authenticating to a cloud project:
+vercel dev --local
+```
+
+Vercel runs both services and routes requests on one local origin. For any future declared bindings, the CLI injects their runtime URLs automatically; do not hardcode or manually set them. The existing separate `npm run dev:backend` / `npm run start:frontend` commands remain available as a standalone workflow; Vite's port-5001 proxy is only for that workflow.
+
+Use a separately approved database for local database operations. The existing `npm --prefix frontend run test:e2e` command instead starts a disposable SQLite fixture; it never writes test accounts to Supabase. `vercel dev` validates the actual service layout and routing, while the browser suite validates application workflows with isolated data.
 
 ## 2. Configure environment variables before deploying
 
@@ -44,10 +65,10 @@ In Supabase, open the existing project, click **Connect**, and choose **Transact
 In the Vercel copy of that URL, preserve other parameters, replace any existing `sslmode`/`sslrootcert`, and set:
 
 ```text
-sslmode=verify-full&sslrootcert=backend/certs/supabase-ca.crt
+sslmode=verify-full&sslrootcert=certs/supabase-ca.crt
 ```
 
-Use `?` before the first query parameter and `&` between parameters. The certificate is bundled with the function; no local `/Users/...` path will work on Vercel. Keep certificate and hostname verification enabled. Do not use the Supabase frontend project URL, anon key or service-role key as `DATABASE_URL`.
+Use `?` before the first query parameter and `&` between parameters. Configuration resolves certificate paths against the backend directory, independently of the runtime working directory. The previous `backend/certs/supabase-ca.crt` setting remains compatible, but no local `/Users/...` path will work on Vercel. Keep certificate and hostname verification enabled. Do not use the Supabase frontend project URL, anon key or service-role key as `DATABASE_URL`.
 
 Do not set `PORT`, `DATABASE_PATH`, `ALLOW_PROTECTED_DATABASE`, admin bootstrap passwords or sample passwords in Vercel. Local `.env` and `backend/.sample-accounts.json` are excluded from Git/deployment uploads. Sample logins are database records; their passwords can be read privately from that local file.
 
@@ -69,10 +90,10 @@ The existing database is already migrated and populated. Do not add migrations o
 ## Troubleshooting
 
 - `SELF_SIGNED_CERT_IN_CHAIN`: verify both TLS query parameters and that the deployment uses this commit with the bundled CA.
-- `ENOENT` opening a certificate: remove the local Mac path and use `backend/certs/supabase-ca.crt`; confirm Root Directory is the repository root.
+- `ENOENT` opening a certificate: remove the local Mac path and use `certs/supabase-ca.crt`; confirm the project Root Directory is the repository root and the backend service root is `backend`.
 - `503` health: inspect sanitized function logs for database network, authentication or schema errors; use the dashboard's pooled connection string.
 - JWT or origin validation failure: use a new 32+ character random signing secret and exact HTTPS `CLIENT_ORIGIN`.
 - API returns HTML: retain the repository's `vercel.json` API rewrites and root directory.
 - Gemini `429` or unavailable: check the selected account's quota, key and model access; the app does not switch to another paid provider automatically.
 
-Official references checked 2026-10-30: [Vercel Git import](https://vercel.com/docs/git), [Node versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions), [function file bundling](https://vercel.com/kb/guide/how-can-i-use-files-in-serverless-functions), [environment variables](https://vercel.com/docs/environment-variables/managing-environment-variables), and [Supabase connections and TLS](https://supabase.com/docs/guides/database/connecting-to-postgres).
+Official references checked 2026-10-30: [Vercel Services](https://vercel.com/docs/services), [service configuration](https://vercel.com/docs/services/config-reference), [routing and preserved paths](https://vercel.com/docs/services/routing), [runtime-only bindings](https://vercel.com/docs/services/bindings), [Node versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions), [environment variables](https://vercel.com/docs/environment-variables/managing-environment-variables), and [Supabase connections and TLS](https://supabase.com/docs/guides/database/connecting-to-postgres).
